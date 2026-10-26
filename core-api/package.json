@@ -1,0 +1,13 @@
+{
+  "name": "hospital-core-api",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "ts-node src/main.ts"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.0.0",
+    "@nestjs/core": "^10.0.0",
+    "pg": "^8.11.0",
+    "redis": "^4.6.0"
+  }
+}
