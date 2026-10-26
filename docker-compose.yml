@@ -1,0 +1,20 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    ports: ["5432:5432"]
+    environment:
+      POSTGRES_DB: hospital_os
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin123
+  redis:
+    image: redis:alpine
+    ports: ["6379:6379"]
+  auth-go:
+    build: ./services/auth-go
+    ports: ["4001:4001"]
+    depends_on: [postgres, redis]
+  core-api:
+    build: ./services/core-api
+    ports: ["4000:4000"]
+    depends_on: [postgres]
