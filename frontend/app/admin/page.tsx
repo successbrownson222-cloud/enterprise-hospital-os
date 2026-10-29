@@ -12,6 +12,19 @@ export default function AdminDashboard() {
     { label: "Critical Alerts", value: "5", sub: "2 in ICU", color: "#ef4444", bar: 35 },
   ];
 
+const admit = async (id:string) => {
+  await fetch("https://YOUR-GO-API-ON-RENDER.onrender.com/api/patients/action", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({id, action:"admit"})
+  }); alert(`Admitted ${id}`)
+}
+const discharge = async (id:string) => {
+  await fetch("https://YOUR-GO-API-ON-RENDER.onrender.com/api/patients/action", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({id, action:"discharge"})
+  }); alert(`Discharged ${id}`)
+}
+
   return (
     <div style={{ minHeight: "100vh", background: "#f6f7fb", fontFamily: "system-ui" }}>
       <style>{`
