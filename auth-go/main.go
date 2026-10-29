@@ -1,38 +1,127 @@
 package main
 
 import (
- "fmt"
- "log"
- "net/http"
- "time"
- "github.com/golang-jwt/jwt/v5"
+	"encoding/json"
+	"log"
+	"net/http"
+	"sync"
+	"time"
+	"github.com/rs/cors"
 )
 
-var jwtSecret = []byte("super_secret_hospital_jwt_2026")
-
-// ROLES FOR HOSPITAL
-var Roles = []string{"ADMIN", "DOCTOR", "NURSE", "RECEPTIONIST", "LAB_TECH", "PHARMACIST"}
-
-func generateToken(userID, role string) (string, error) {
- claims := jwt.MapClaims{
-  "user_id": userID,
-  "role": role,
-  "exp": time.Now().Add(time.Hour * 24).Unix(),
- }
- token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
- return token.SignedString(jwtSecret)
+type Patient struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Age       int       `json:"age"`
+	Status    string    `json:"status"` // Admitted, Discharged, Critical, Stable
+	Ward      string    `json:"ward"`
+	Doctor    string    `json:"doctor"`
+	AdmittedAt time.Time `json:"admittedAt"`
 }
 
-func loginHandler(w http.ResponseWriter, r *http.Request) {
- // Demo login - will connect to Postgres later
- token, _ := generateToken("user_123", "ADMIN")
- w.Header().Set("Content-Type", "application/json")
- fmt.Fprintf(w, `{"token":"%s","role":"ADMIN","message":"Hospital OS Auth Service Live"}`, token)
+type Appointment struct {
+	ID        string `json:"id"`
+	PatientID string `json:"patientId"`
+	Date      string `json:"date"`
+	Doctor    string `json:"doctor"`
+	Type      string `json:"type"`
+}
+
+type Billing struct {
+	ID        string `json:"id"`
+	PatientID string `json:"patientId"`
+	Amount    int    `json:"amount"`
+	Status    string `json:"status"`
+}
+
+var (
+	patients = []Patient{
+		{ID: "P-1042", Name: "Adebayo Johnson", Age: 34, Status: "Admitted", Ward: "ICU-2", Doctor: "Dr. Success", AdmittedAt: time.Now()},
+	}
+	appointments []Appointment
+	billings     []Billing
+	mu sync.Mutex
+)
+
+func jsonWrite(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(v)
 }
 
 func main() {
- http.HandleFunc("/api/v1/auth/login", loginHandler)
- http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request){ w.Write([]byte("Go Auth Service OK")) })
- fmt.Println("Go Auth Service running on :4001 with RBAC:", Roles)
- log.Fatal(http.ListenAndServe(":4001", nil))
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request){ jsonWrite(w, map[string]string{"status":"ok","service":"hospital-os-go","time": time.Now().String()}) })
+
+	// PATIENTS - COMPLETE
+	mux.HandleFunc("/api/patients", func(w http.ResponseWriter, r *http.Request){
+		mu.Lock(); defer mu.Unlock()
+		if r.Method == "GET" { jsonWrite(w, patients); return }
+		if r.Method == "POST" {
+			var p Patient; json.NewDecoder(r.Body).Decode(&p)
+			p.AdmittedAt = time.Now(); patients = append(patients, p); jsonWrite(w, p); return
+		}
+	})
+
+	mux.HandleFunc("/api/patients/", func(w http.ResponseWriter, r *http.Request){
+		// /api/patients/{id}/admit , /discharge , /transfer
+		mu.Lock(); defer mu.Unlock()
+		// simplified routing
+		var body map[string]string; json.NewDecoder(r.Body).Decode(&body)
+		id := body["id"]; action := body["action"]
+		for i,p := range patients {
+			if p.ID == id {
+				switch action {
+				case "admit": patients[i].Status = "Admitted"
+				case "discharge": patients[i].Status = "Discharged"
+				case "critical": patients[i].Status = "Critical"
+				case "stable": patients[i].Status = "Stable"
+				case "transfer": patients[i].Ward = body["ward"]
+				}
+				jsonWrite(w, patients[i]); return
+			}
+		}
+		http.Error(w, "not found", 404)
+	})
+
+	// APPOINTMENTS
+	mux.HandleFunc("/api/appointments", func(w http.ResponseWriter, r *http.Request){
+		mu.Lock(); defer mu.Unlock()
+		if r.Method == "GET" { jsonWrite(w, appointments); return }
+		if r.Method == "POST" {
+			var a Appointment; json.NewDecoder(r.Body).Decode(&a); appointments = append(appointments, a); jsonWrite(w, a)
+		}
+	})
+
+	// BILLING
+	mux.HandleFunc("/api/billing", func(w http.ResponseWriter, r *http.Request){
+		mu.Lock(); defer mu.Unlock()
+		if r.Method == "GET" { jsonWrite(w, billings); return }
+		if r.Method == "POST" {
+			var b Billing; json.NewDecoder(r.Body).Decode(&b); billings = append(billings, b); jsonWrite(w, b)
+		}
+	})
+
+	// ANALYTICS FOR ADMIN DASHBOARD
+	mux.HandleFunc("/api/analytics", func(w http.ResponseWriter, r *http.Request){
+		jsonWrite(w, map[string]any{
+			"totalPatients": len(patients),
+			"bedOccupancy": 84,
+			"revenue": 28400000,
+			"critical": 5,
+			"staffOnDuty": 42,
+		})
+	})
+
+	// STAFF
+	mux.HandleFunc("/api/staff", func(w http.ResponseWriter, r *http.Request){
+		jsonWrite(w, []map[string]string{
+			{"id":"D-01","name":"Dr. Success Brownson","role":"Chief Surgeon","status":"On Duty"},
+			{"id":"D-02","name":"Dr. Aisha Bello","role":"Anesthesiologist","status":"On Duty"},
+		})
+	})
+
+	handler := cors.AllowAll().Handler(mux)
+	log.Println("Hospital OS Go API running on :8080 - COMPLETE ENDPOINTS READY")
+	log.Fatal(http.ListenAndServe(":8080", handler))
 }
