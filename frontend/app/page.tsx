@@ -1,29 +1,31 @@
 "use client";
 import { useState, useMemo, useEffect } from "react";
+import { io, Socket } from "socket.io-client";
 
 type Patient = { id: string; name: string; age: number; status: "Admitted"|"Discharged"|"Critical"|"Stable"; doctor: string; ward: string; avatar: string; date: string; };
 
-const data: Patient[] = [
+const mockData: Patient[] = [
   { id: "P-1042", name: "Adebayo Johnson", age: 34, status: "Admitted", doctor: "Dr. Success Brownson", ward: "ICU-2", avatar: "AJ", date: "08:42" },
   { id: "P-1043", name: "Chioma Okoro", age: 28, status: "Stable", doctor: "Dr. Emeka", ward: "W-4", avatar: "CO", date: "09:12" },
   { id: "P-1044", name: "Musa Ibrahim", age: 45, status: "Critical", doctor: "Dr. Aisha Bello", ward: "ER-1", avatar: "MI", date: "10:03" },
 ];
 
-// --- BACKEND WIRING ---
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://enterprise-hospital-os.onrender.com";
-const AI_URL = process.env.NEXT_PUBLIC_AI_API_URL || "https://hospital-os-ai-python.onrender.com";
+// ENV ONLY - no hardcoded fallback so you control from Vercel dashboard
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
+const AI_URL = process.env.NEXT_PUBLIC_AI_API_URL;
+const REALTIME_URL = process.env.NEXT_PUBLIC_REALTIME_URL;
 
 async function fetchPatients(): Promise<Patient[]> {
+  if(!API_URL) return mockData;
   try {
     const res = await fetch(`${API_URL}/api/patients`, { cache: 'no-store' });
     if (!res.ok) throw new Error("API not ready");
     const json = await res.json();
-    // your Go API might return {patients:[]} or [] directly
     const list = json.patients || json.data || json;
-    return Array.isArray(list) ? list : data;
+    return Array.isArray(list) ? list : mockData;
   } catch (e) {
     console.log("Falling back to mock:", e);
-    return data;
+    return mockData;
   }
 }
 
@@ -31,16 +33,29 @@ export default function HospitalOSMobile() {
   const [active, setActive] = useState("dashboard");
   const [menuOpen, setMenuOpen] = useState(false);
   const [q, setQ] = useState("");
-  const [patients, setPatients] = useState<Patient[]>(data);
+  const [patients, setPatients] = useState<Patient[]>(mockData);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Patient|null>(null);
+  const [socket, setSocket] = useState<Socket|null>(null);
+  const [liveAlert, setLiveAlert] = useState<string|null>(null);
 
-  // THIS IS THE WIRING - fetches from Render on load
   useEffect(() => {
     fetchPatients().then(p => {
       if(p.length > 0) setPatients(p);
       setLoading(false);
     });
+
+    // REALTIME CONNECTION
+    if(REALTIME_URL){
+      const s = io(REALTIME_URL);
+      s.emit('join-ward', 'ICU-2');
+      s.on('critical-patient', (d: any) => {
+        setLiveAlert(`🚨 ${d.patient_id} Critical in ${d.ward}`);
+        setTimeout(()=>setLiveAlert(null), 5000);
+      });
+      setSocket(s);
+      return () => { s.disconnect(); }
+    }
   }, []);
 
   const filtered = useMemo(()=> patients.filter(p=> (p.name+p.id).toLowerCase().includes(q.toLowerCase())), [q, patients]);
@@ -64,6 +79,12 @@ export default function HospitalOSMobile() {
         @media (max-width: 767px) { .show-desktop { display:none !important; } }
       `}</style>
 
+      {liveAlert && (
+        <div style={{position:"fixed", top:"62px", left:"16px", right:"16px", background:"#ef4444", color:"white", padding:"12px", borderRadius:"12px", zIndex:100, textAlign:"center", fontWeight:700, animation:"fadeIn 0.3s ease"}}>
+          {liveAlert}
+        </div>
+      )}
+
       <header style={{height:"56px", background:"rgba(255,255,255,0.9)", backdropFilter:"blur(12px)", borderBottom:"1px solid #e2e8f0", display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 16px", position:"sticky", top:0, zIndex:20}}>
         <div style={{display:"flex", alignItems:"center", gap:"10px"}}>
           <button onClick={()=>setMenuOpen(!menuOpen)} className="hide-desktop" style={{width:"40px", height:"40px", borderRadius:"10px", border:"1px solid #e2e8f0", background:"white", fontSize:"18px"}}>☰</button>
@@ -83,7 +104,7 @@ export default function HospitalOSMobile() {
               <button key={n.id} onClick={()=>setActive(n.id)} style={{textAlign:"left", padding:"12px", borderRadius:"10px", border:"none", background: active===n.id ? "#ffffff14" : "transparent", color: active===n.id ? "white" : "#94a3b8", display:"flex", gap:"10px", fontWeight: active===n.id ? 700 : 500, cursor:"pointer"}}>{n.i} {n.l}</button>
             ))}
           </div>
-          <div style={{marginTop:"auto", fontSize:"10px", color:"#475569", padding:"12px"}}>API: {API_URL.replace('https://','').slice(0,20)}...</div>
+          <div style={{marginTop:"auto", fontSize:"10px", color:"#475569", padding:"12px"}}>{API_URL ? "API Connected" : "Using Mock - Add ENV"}</div>
         </aside>
 
         {menuOpen && (
@@ -146,11 +167,8 @@ export default function HospitalOSMobile() {
             <div className="animate-fade" style={{background:"white", borderRadius:"16px", padding:"32px", textAlign:"center", border:"1px solid #e2e8f0"}}>
               <div style={{fontSize:"32px", marginBottom:"8px"}}>{nav.find(n=>n.id===active)?.i}</div><h3 style={{textTransform:"capitalize", margin:0}}>{active}</h3><p style={{color:"#64748b", fontSize:"13px", marginTop:"6px"}}>Connected to: {active==="ai" ? AI_URL : API_URL}</p>
               <button onClick={async()=>{
-                if(active==="ai"){
-                  const r = await fetch(`${AI_URL}/docs`); alert(r.ok ? "AI API LIVE!" : "AI API check /docs");
-                } else {
-                  const r = await fetch(`${API_URL}/api/health` || `${API_URL}/health`); alert(r.ok ? "Go API LIVE!" : "Check Go API");
-                }
+                const url = active==="ai" ? `${AI_URL}/docs` : `${API_URL}/health`;
+                try{ const r = await fetch(url); alert(r.ok ? `${active} API LIVE!` : "API not responding"); } catch{ alert("Cannot reach API - check ENV"); }
               }} style={{marginTop:"16px", padding:"12px 18px", background:"#0a0f1e", color:"white", borderRadius:"12px", border:"none", width:"100%"}}>Test {active} API</button>
             </div>
           )}
@@ -177,4 +195,4 @@ export default function HospitalOSMobile() {
       )}
     </div>
   );
-} 
+}
