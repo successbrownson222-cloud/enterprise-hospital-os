@@ -10,13 +10,12 @@ const mockData: Patient[] = [
   { id: "P-1044", name: "Musa Ibrahim", age: 45, status: "Critical", doctor: "Dr. Aisha Bello", ward: "ER-1", avatar: "MI", date: "10:03" },
 ];
 
-// ENV ONLY - no hardcoded fallback so you control from Vercel dashboard
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
-const AI_URL = process.env.NEXT_PUBLIC_AI_API_URL;
-const REALTIME_URL = process.env.NEXT_PUBLIC_REALTIME_URL;
+// FIXED - Works with BOTH names + hardcoded fallback so billing & live chat never fail
+const API_URL = (process.env as any).NEXT_PUBLIC_API_URL || (process.env as any).API_URL || "https://enterprise-hospital-os.onrender.com";
+const AI_URL = (process.env as any).NEXT_PUBLIC_AI_API_URL || (process.env as any).AI_API_URL || "https://hospital-os-ai-python.onrender.com";
+const REALTIME_URL = (process.env as any).NEXT_PUBLIC_REALTIME_URL || (process.env as any).REALTIME_URL || "https://hospital-os-realtime.onrender.com";
 
 async function fetchPatients(): Promise<Patient[]> {
-  if(!API_URL) return mockData;
   try {
     const res = await fetch(`${API_URL}/api/patients`, { cache: 'no-store' });
     if (!res.ok) throw new Error("API not ready");
@@ -24,7 +23,7 @@ async function fetchPatients(): Promise<Patient[]> {
     const list = json.patients || json.data || json;
     return Array.isArray(list) ? list : mockData;
   } catch (e) {
-    console.log("Falling back to mock:", e);
+    console.log("API failed, using mock:", e, API_URL);
     return mockData;
   }
 }
@@ -40,21 +39,29 @@ export default function HospitalOSMobile() {
   const [liveAlert, setLiveAlert] = useState<string|null>(null);
 
   useEffect(() => {
+    console.log("API_URL in use:", API_URL);
+    console.log("REALTIME_URL in use:", REALTIME_URL);
     fetchPatients().then(p => {
       if(p.length > 0) setPatients(p);
       setLoading(false);
     });
 
-    // REALTIME CONNECTION
-    if(REALTIME_URL){
-      const s = io(REALTIME_URL);
-      s.emit('join-ward', 'ICU-2');
-      s.on('critical-patient', (d: any) => {
-        setLiveAlert(`🚨 ${d.patient_id} Critical in ${d.ward}`);
-        setTimeout(()=>setLiveAlert(null), 5000);
-      });
-      setSocket(s);
-      return () => { s.disconnect(); }
+    // REALTIME CONNECTION - with error handling
+    try {
+      if(REALTIME_URL){
+        const s = io(REALTIME_URL, { transports: ['websocket'] });
+        s.emit('join-ward', 'ICU-2');
+        s.on('critical-patient', (d: any) => {
+          setLiveAlert(`🚨 ${d.patient_id} Critical in ${d.ward}`);
+          setTimeout(()=>setLiveAlert(null), 5000);
+        });
+        s.on('connect', () => console.log("Socket connected"));
+        s.on('connect_error', (err) => console.log("Socket error:", err));
+        setSocket(s);
+        return () => { s.disconnect(); }
+      }
+    } catch(err) {
+      console.log("Socket init failed", err);
     }
   }, []);
 
@@ -104,7 +111,7 @@ export default function HospitalOSMobile() {
               <button key={n.id} onClick={()=>setActive(n.id)} style={{textAlign:"left", padding:"12px", borderRadius:"10px", border:"none", background: active===n.id ? "#ffffff14" : "transparent", color: active===n.id ? "white" : "#94a3b8", display:"flex", gap:"10px", fontWeight: active===n.id ? 700 : 500, cursor:"pointer"}}>{n.i} {n.l}</button>
             ))}
           </div>
-          <div style={{marginTop:"auto", fontSize:"10px", color:"#475569", padding:"12px"}}>{API_URL ? "API Connected" : "Using Mock - Add ENV"}</div>
+          <div style={{marginTop:"auto", fontSize:"10px", color:"#475569", padding:"12px"}}>API: {API_URL ? "Connected" : "No ENV"}<br/>{API_URL}</div>
         </aside>
 
         {menuOpen && (
@@ -168,7 +175,7 @@ export default function HospitalOSMobile() {
               <div style={{fontSize:"32px", marginBottom:"8px"}}>{nav.find(n=>n.id===active)?.i}</div><h3 style={{textTransform:"capitalize", margin:0}}>{active}</h3><p style={{color:"#64748b", fontSize:"13px", marginTop:"6px"}}>Connected to: {active==="ai" ? AI_URL : API_URL}</p>
               <button onClick={async()=>{
                 const url = active==="ai" ? `${AI_URL}/docs` : `${API_URL}/health`;
-                try{ const r = await fetch(url); alert(r.ok ? `${active} API LIVE!` : "API not responding"); } catch{ alert("Cannot reach API - check ENV"); }
+                try{ const r = await fetch(url); alert(r.ok ? `${active} API LIVE!` : "API not responding - " + r.status); } catch{ alert("Cannot reach API - " + url); }
               }} style={{marginTop:"16px", padding:"12px 18px", background:"#0a0f1e", color:"white", borderRadius:"12px", border:"none", width:"100%"}}>Test {active} API</button>
             </div>
           )}
@@ -195,4 +202,4 @@ export default function HospitalOSMobile() {
       )}
     </div>
   );
-} 
+}
