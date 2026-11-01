@@ -10,22 +10,25 @@ const mockData: Patient[] = [
   { id: "P-1044", name: "Musa Ibrahim", age: 45, status: "Critical", doctor: "Dr. Aisha Bello", ward: "ER-1", avatar: "MI", date: "10:03" },
 ];
 
-// FIXED - Works with BOTH names + hardcoded fallback so billing & live chat never fail
+// WORKS EVEN IF VERCEL ENV FAILS
 const API_URL = (process.env as any).NEXT_PUBLIC_API_URL || (process.env as any).API_URL || "https://enterprise-hospital-os.onrender.com";
 const AI_URL = (process.env as any).NEXT_PUBLIC_AI_API_URL || (process.env as any).AI_API_URL || "https://hospital-os-ai-python.onrender.com";
 const REALTIME_URL = (process.env as any).NEXT_PUBLIC_REALTIME_URL || (process.env as any).REALTIME_URL || "https://hospital-os-realtime.onrender.com";
 
 async function fetchPatients(): Promise<Patient[]> {
-  try {
-    const res = await fetch(`${API_URL}/api/patients`, { cache: 'no-store' });
-    if (!res.ok) throw new Error("API not ready");
-    const json = await res.json();
-    const list = json.patients || json.data || json;
-    return Array.isArray(list) ? list : mockData;
-  } catch (e) {
-    console.log("API failed, using mock:", e, API_URL);
-    return mockData;
+  const urlsToTry = [`${API_URL}/api/patients`, `${API_URL}/patients`, `${API_URL}/api/patient`, `${API_URL}/health`];
+  for(const url of urlsToTry){
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) continue;
+      const json = await res.json();
+      const list = json.patients || json.data || json;
+      if(Array.isArray(list) && list.length > 0) return list;
+      if(Array.isArray(json) && json.length > 0) return json;
+    } catch(e) {}
   }
+  console.log("All API attempts failed, using mock");
+  return mockData;
 }
 
 export default function HospitalOSMobile() {
@@ -37,33 +40,50 @@ export default function HospitalOSMobile() {
   const [selected, setSelected] = useState<Patient|null>(null);
   const [socket, setSocket] = useState<Socket|null>(null);
   const [liveAlert, setLiveAlert] = useState<string|null>(null);
+  
+  // CHAT STATES
+  const [chatOpen, setChatOpen] = useState(false);
+  const [messages, setMessages] = useState<{user:string,text:string}[]>([
+    {user:"System", text:"ICU-2 ward live — type to chat with staff"}
+  ]);
+  const [chatInput, setChatInput] = useState("");
 
   useEffect(() => {
-    console.log("API_URL in use:", API_URL);
-    console.log("REALTIME_URL in use:", REALTIME_URL);
+    console.log("API:", API_URL, "REALTIME:", REALTIME_URL);
     fetchPatients().then(p => {
       if(p.length > 0) setPatients(p);
       setLoading(false);
     });
 
-    // REALTIME CONNECTION - with error handling
     try {
-      if(REALTIME_URL){
-        const s = io(REALTIME_URL, { transports: ['websocket'] });
+      const s = io(REALTIME_URL, { transports: ['websocket', 'polling'] });
+      s.on('connect', () => {
+        console.log("Socket LIVE connected");
         s.emit('join-ward', 'ICU-2');
-        s.on('critical-patient', (d: any) => {
-          setLiveAlert(`🚨 ${d.patient_id} Critical in ${d.ward}`);
-          setTimeout(()=>setLiveAlert(null), 5000);
-        });
-        s.on('connect', () => console.log("Socket connected"));
-        s.on('connect_error', (err) => console.log("Socket error:", err));
-        setSocket(s);
-        return () => { s.disconnect(); }
-      }
+      });
+      s.on('critical-patient', (d: any) => {
+        setLiveAlert(`🚨 ${d.patient_id || 'Patient'} Critical in ${d.ward || 'ICU'}`);
+        setTimeout(()=>setLiveAlert(null), 5000);
+      });
+      s.on('ward-message', (d: any) => {
+        setMessages(prev => [...prev, {user: d.user || 'Doctor', text: d.text || d.message}]);
+      });
+      s.on('connect_error', (err) => console.log("Socket error - is realtime service sleeping on Render?", err.message));
+      setSocket(s);
+      return () => { s.disconnect(); }
     } catch(err) {
       console.log("Socket init failed", err);
     }
   }, []);
+
+  const sendMessage = () => {
+    if(!chatInput.trim()) return;
+    if(socket?.connected){
+      socket.emit('ward-message', { ward: 'ICU-2', user: 'SB', text: chatInput });
+    }
+    setMessages(prev => [...prev, {user:"You", text: chatInput}]);
+    setChatInput("");
+  }
 
   const filtered = useMemo(()=> patients.filter(p=> (p.name+p.id).toLowerCase().includes(q.toLowerCase())), [q, patients]);
 
@@ -87,7 +107,7 @@ export default function HospitalOSMobile() {
       `}</style>
 
       {liveAlert && (
-        <div style={{position:"fixed", top:"62px", left:"16px", right:"16px", background:"#ef4444", color:"white", padding:"12px", borderRadius:"12px", zIndex:100, textAlign:"center", fontWeight:700, animation:"fadeIn 0.3s ease"}}>
+        <div style={{position:"fixed", top:"62px", left:"16px", right:"16px", background:"#ef4444", color:"white", padding:"12px", borderRadius:"12px", zIndex:100, textAlign:"center", fontWeight:700}}>
           {liveAlert}
         </div>
       )}
@@ -99,7 +119,7 @@ export default function HospitalOSMobile() {
           <b>Hospital OS</b>
         </div>
         <div style={{display:"flex", gap:"8px", alignItems:"center"}}>
-          <span style={{fontSize:"11px", background: loading ? "#fef3c7" : "#dcfce7", color: loading ? "#d97706" : "#16a34a", padding:"4px 8px", borderRadius:"20px"}}>● {loading ? "SYNCING" : "LIVE"}</span>
+          <span style={{fontSize:"11px", background: loading ? "#fef3c7" : "#dcfce7", color: loading ? "#d97706" : "#16a34a", padding:"4px 8px", borderRadius:"20px"}}>● {socket?.connected ? "LIVE" : loading ? "SYNCING" : "MOCK"}</span>
           <div style={{width:"32px", height:"32px", borderRadius:"50%", background:"#0a0f1e", color:"white", display:"grid", placeItems:"center", fontSize:"12px", fontWeight:700}}>SB</div>
         </div>
       </header>
@@ -111,7 +131,7 @@ export default function HospitalOSMobile() {
               <button key={n.id} onClick={()=>setActive(n.id)} style={{textAlign:"left", padding:"12px", borderRadius:"10px", border:"none", background: active===n.id ? "#ffffff14" : "transparent", color: active===n.id ? "white" : "#94a3b8", display:"flex", gap:"10px", fontWeight: active===n.id ? 700 : 500, cursor:"pointer"}}>{n.i} {n.l}</button>
             ))}
           </div>
-          <div style={{marginTop:"auto", fontSize:"10px", color:"#475569", padding:"12px"}}>API: {API_URL ? "Connected" : "No ENV"}<br/>{API_URL}</div>
+          <div style={{marginTop:"auto", fontSize:"10px", color:"#475569", padding:"12px"}}>API: {API_URL}<br/>Sock: {socket?.connected ? "Connected" : "Connecting"}</div>
         </aside>
 
         {menuOpen && (
@@ -148,7 +168,7 @@ export default function HospitalOSMobile() {
               <div style={{marginTop:"16px", background:"white", borderRadius:"16px", padding:"16px", border:"1px solid #e2e8f0"}}>
                 <div style={{display:"flex", justifyContent:"space-between", marginBottom:"12px"}}><b>Recent {loading && "(syncing...)"}</b><button onClick={()=>setActive("patients")} style={{color:"#3b82f6", background:"none", border:"none", fontSize:"13px"}}>See all</button></div>
                 {filtered.map(p=>(
-                  <div key={p.id} onClick={()=>setSelected(p)} style={{display:"flex", gap:"12px", padding:"12px", borderRadius:"12px", alignItems:"center"}}>
+                  <div key={p.id} onClick={()=>setSelected(p)} style={{display:"flex", gap:"12px", padding:"12px", borderRadius:"12px", alignItems:"center", cursor:"pointer"}}>
                     <div style={{width:"44px", height:"44px", borderRadius:"12px", background:"#0a0f1e", color:"white", display:"grid", placeItems:"center", fontWeight:700}}>{p.avatar}</div>
                     <div style={{flex:1}}><div style={{fontWeight:600, fontSize:"14px"}}>{p.name}</div><div style={{fontSize:"12px", color:"#64748b"}}>{p.ward} • {p.date}</div></div>
                     <span style={{fontSize:"10px", padding:"4px 8px", borderRadius:"20px", background: p.status==="Critical" ? "#fee2e2" : "#dcfce7"}}>{p.status}</span>
@@ -161,7 +181,7 @@ export default function HospitalOSMobile() {
           {active==="patients" && (
             <div className="animate-fade" style={{background:"white", borderRadius:"16px", border:"1px solid #e2e8f0", overflow:"hidden"}}>
               {filtered.map(p=>(
-                <div key={p.id} onClick={()=>setSelected(p)} style={{padding:"14px 16px", display:"flex", gap:"12px", borderBottom:"1px solid #f1f5f9"}}>
+                <div key={p.id} onClick={()=>setSelected(p)} style={{padding:"14px 16px", display:"flex", gap:"12px", borderBottom:"1px solid #f1f5f9", cursor:"pointer"}}>
                   <div style={{width:"44px", height:"44px", borderRadius:"12px", background:"#e2e8f0", display:"grid", placeItems:"center", fontWeight:700}}>{p.avatar}</div>
                   <div style={{flex:1}}><div style={{fontWeight:600}}>{p.name} <span style={{fontSize:"11px", color:"#64748b"}}>{p.id}</span></div><div style={{fontSize:"12px", color:"#64748b"}}>{p.doctor}</div></div>
                   <div style={{fontSize:"11px", color:"#64748b"}}>{p.date}</div>
@@ -172,11 +192,16 @@ export default function HospitalOSMobile() {
 
           {active!=="dashboard" && active!=="patients" && (
             <div className="animate-fade" style={{background:"white", borderRadius:"16px", padding:"32px", textAlign:"center", border:"1px solid #e2e8f0"}}>
-              <div style={{fontSize:"32px", marginBottom:"8px"}}>{nav.find(n=>n.id===active)?.i}</div><h3 style={{textTransform:"capitalize", margin:0}}>{active}</h3><p style={{color:"#64748b", fontSize:"13px", marginTop:"6px"}}>Connected to: {active==="ai" ? AI_URL : API_URL}</p>
+              <div style={{fontSize:"32px", marginBottom:"8px"}}>{nav.find(n=>n.id===active)?.i}</div><h3 style={{textTransform:"capitalize", margin:0}}>{active}</h3><p style={{color:"#64748b", fontSize:"13px", marginTop:"6px", wordBreak:"break-all"}}>API: {active==="ai" ? AI_URL : API_URL}</p>
               <button onClick={async()=>{
-                const url = active==="ai" ? `${AI_URL}/docs` : `${API_URL}/health`;
-                try{ const r = await fetch(url); alert(r.ok ? `${active} API LIVE!` : "API not responding - " + r.status); } catch{ alert("Cannot reach API - " + url); }
-              }} style={{marginTop:"16px", padding:"12px 18px", background:"#0a0f1e", color:"white", borderRadius:"12px", border:"none", width:"100%"}}>Test {active} API</button>
+                const url = active==="ai" ? `${AI_URL}/docs` : active==="billing" ? `${API_URL}/api/billing` : `${API_URL}/health`;
+                try{ 
+                  const r = await fetch(url); 
+                  const t = await r.text();
+                  alert(r.ok ? `${active} LIVE! ${t.slice(0,100)}` : `Status ${r.status}: ${t.slice(0,100)}`); 
+                } catch(e:any){ alert("Cannot reach: " + url + " - " + e.message); }
+              }} style={{marginTop:"16px", padding:"12px 18px", background:"#0a0f1e", color:"white", borderRadius:"12px", border:"none", width:"100%", cursor:"pointer"}}>Test {active} API</button>
+              <p style={{fontSize:"11px", color:"#94a3b8", marginTop:"12px"}}>If fail, your Go backend needs CORS: go get github.com/rs/cors</p>
             </div>
           )}
         </main>
@@ -184,19 +209,44 @@ export default function HospitalOSMobile() {
 
       <div className="hide-desktop" style={{position:"fixed", bottom:0, left:0, right:0, background:"rgba(255,255,255,0.95)", backdropFilter:"blur(20px)", borderTop:"1px solid #e2e8f0", display:"flex", justifyContent:"space-around", padding:"8px 0 calc(8px + env(safe-area-inset-bottom))", zIndex:20}}>
         {nav.slice(0,5).map(n=>(
-          <button key={n.id} onClick={()=>setActive(n.id)} style={{background:"none", border:"none", display:"flex", flexDirection:"column", alignItems:"center", gap:"2px", color: active===n.id ? "#0a0f1e" : "#94a3b8"}}>
+          <button key={n.id} onClick={()=>setActive(n.id)} style={{background:"none", border:"none", display:"flex", flexDirection:"column", alignItems:"center", gap:"2px", color: active===n.id ? "#0a0f1e" : "#94a3b8", cursor:"pointer"}}>
             <span style={{fontSize:"20px", background: active===n.id ? "#0a0f1e" : "transparent", color: active===n.id ? "white" : "#94a3b8", width:"36px", height:"28px", borderRadius:"10px", display:"grid", placeItems:"center"}}>{n.i}</span>
             <span style={{fontSize:"10px", fontWeight: active===n.id ? 700 : 400}}>{n.l}</span>
           </button>
         ))}
       </div>
 
+      {/* LIVE CHAT WIDGET - THIS WAS MISSING */}
+      <div style={{position:"fixed", bottom:"90px", right:"16px", zIndex:40}}>
+        {chatOpen ? (
+          <div className="animate-fade" style={{width:"320px", height:"380px", background:"white", borderRadius:"16px", border:"1px solid #e2e8f0", boxShadow:"0 10px 30px rgba(0,0,0,0.15)", display:"flex", flexDirection:"column", overflow:"hidden"}}>
+            <div style={{padding:"12px", background:"#0a0f1e", color:"white", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+              <b style={{fontSize:"13px"}}>💬 ICU-2 Live {socket?.connected ? "● LIVE" : "○ Connecting"}</b>
+              <button onClick={()=>setChatOpen(false)} style={{background:"#ffffff20", border:"none", color:"white", width:"28px", height:"28px", borderRadius:"8px", cursor:"pointer"}}>✕</button>
+            </div>
+            <div style={{flex:1, overflowY:"auto", padding:"12px", display:"flex", flexDirection:"column", gap:"8px", background:"#f8fafc"}}>
+              {messages.map((m,i)=>(
+                <div key={i} style={{background: m.user==="You" ? "#0a0f1e" : "white", color: m.user==="You" ? "white" : "#0a0f1e", padding:"8px 12px", borderRadius:"12px", alignSelf: m.user==="You" ? "flex-end" : "flex-start", maxWidth:"80%", fontSize:"13px", border:"1px solid #e2e8f0"}}>
+                  <div style={{fontSize:"10px", opacity:0.6}}>{m.user}</div>{m.text}
+                </div>
+              ))}
+            </div>
+            <div style={{padding:"10px", borderTop:"1px solid #e2e8f0", display:"flex", gap:"8px"}}>
+              <input value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={e=>e.key==="Enter" && sendMessage()} placeholder="Type message..." style={{flex:1, padding:"10px", borderRadius:"10px", border:"1px solid #e2e8f0", outline:"none", fontSize:"14px"}}/>
+              <button onClick={sendMessage} style={{background:"#0a0f1e", color:"white", border:"none", padding:"0 14px", borderRadius:"10px", fontWeight:700, cursor:"pointer"}}>Send</button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={()=>setChatOpen(true)} style={{width:"56px", height:"56px", borderRadius:"50%", background:"#0a0f1e", color:"white", border:"none", fontSize:"24px", boxShadow:"0 8px 20px rgba(0,0,0,0.2)", cursor:"pointer"}}>💬</button>
+        )}
+      </div>
+
       {selected && (
         <div onClick={()=>setSelected(null)} style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", backdropFilter:"blur(6px)", display:"grid", placeItems:"center", zIndex:50, padding:"16px"}}>
           <div onClick={e=>e.stopPropagation()} className="animate-fade" style={{background:"white", borderRadius:"20px", padding:"20px", width:"100%", maxWidth:"360px"}}>
-            <div style={{display:"flex", justifyContent:"space-between"}}><h3 style={{margin:0}}>{selected.name}</h3><button onClick={()=>setSelected(null)} style={{border:"none", background:"#f1f5f9", width:"32px", height:"32px", borderRadius:"10px"}}>✕</button></div>
+            <div style={{display:"flex", justifyContent:"space-between"}}><h3 style={{margin:0}}>{selected.name}</h3><button onClick={()=>setSelected(null)} style={{border:"none", background:"#f1f5f9", width:"32px", height:"32px", borderRadius:"10px", cursor:"pointer"}}>✕</button></div>
             <div style={{marginTop:"16px", background:"#f8fafc", borderRadius:"12px", padding:"12px", fontSize:"13px", lineHeight:1.8}}>ID: <b>{selected.id}</b><br/>Ward: {selected.ward}<br/>Doctor: {selected.doctor}<br/>Status: {selected.status}</div>
-            <button style={{marginTop:"14px", width:"100%", padding:"14px", background:"#0a0f1e", color:"white", borderRadius:"12px", border:"none", fontWeight:700}} onClick={()=>setSelected(null)}>Close</button>
+            <button style={{marginTop:"14px", width:"100%", padding:"14px", background:"#0a0f1e", color:"white", borderRadius:"12px", border:"none", fontWeight:700, cursor:"pointer"}} onClick={()=>setSelected(null)}>Close</button>
           </div>
         </div>
       )}
