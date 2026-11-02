@@ -60,7 +60,6 @@ func main() {
 	initDB()
 	mux := http.NewServeMux()
 
-	// HEALTH - used by frontend Test API button
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -76,18 +75,14 @@ func main() {
 		})
 	})
 
-	// PATIENTS - supports GET and POST
 	mux.HandleFunc("/api/patients", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(200)
 			return
 		}
-
 		if db == nil {
-			// memory fallback - return full mock that frontend expects
 			mock := []Patient{
 				{ID: "P-1042", Name: "Adebayo Johnson", Age: 34, Status: "Admitted", Ward: "ICU-2", Doctor: "Dr. Success Brownson", Avatar: "AJ", CreatedAt: time.Now()},
 				{ID: "P-1043", Name: "Chioma Okoro", Age: 28, Status: "Stable", Ward: "W-4", Doctor: "Dr. Emeka", Avatar: "CO", CreatedAt: time.Now()},
@@ -96,7 +91,6 @@ func main() {
 			json.NewEncoder(w).Encode(mock)
 			return
 		}
-
 		if r.Method == "GET" {
 			rows, err := db.Query("SELECT id,name,age,status,ward,doctor,created_at FROM patients ORDER BY created_at DESC")
 			if err != nil {
@@ -104,20 +98,23 @@ func main() {
 				return
 			}
 			defer rows.Close()
-
 			list := []Patient{}
 			for rows.Next() {
 				var p Patient
 				if err := rows.Scan(&p.ID, &p.Name, &p.Age, &p.Status, &p.Ward, &p.Doctor, &p.CreatedAt); err != nil {
 					continue
 				}
-				p.Avatar = string(p.Name[0]) + string(p.Name[len(p.Name)/2])
+				if len(p.Name) > 0 {
+					p.Avatar = string(p.Name[0])
+					if len(p.Name) > 2 {
+						p.Avatar += string(p.Name[1])
+					}
+				}
 				list = append(list, p)
 			}
 			json.NewEncoder(w).Encode(list)
 			return
 		}
-
 		if r.Method == "POST" {
 			var p Patient
 			if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -136,7 +133,6 @@ func main() {
 		}
 	})
 
-	// PATIENT ACTION - admit/discharge/transfer
 	mux.HandleFunc("/api/patients/action", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -145,10 +141,9 @@ func main() {
 			return
 		}
 		var req struct {
-			ID, Action, Ward string `json:"id"`
+			ID, Action, Ward string
 		}
 		json.NewDecoder(r.Body).Decode(&req)
-
 		if db == nil {
 			json.NewEncoder(w).Encode(req)
 			return
@@ -164,7 +159,6 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]string{"id": req.ID, "newStatus": req.Action})
 	})
 
-	// FIX FOR YOUR BUTTONS - these were missing, now they work
 	mux.HandleFunc("/api/billing", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -192,7 +186,30 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{"totalPatients": count, "bedOccupancy": 84, "revenue": 28400000})
 	})
 
-	// CORS - AllowAll fixes your "api not responding" error
+	// SEED ENDPOINT - PHONE FRIENDLY - Just open this URL to fill DB
+	mux.HandleFunc("/api/seed", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		if db == nil {
+			json.NewEncoder(w).Encode(map[string]string{"error": "db not connected - check DATABASE_URL"})
+			return
+		}
+		seedPatients := []Patient{
+			{ID: "P-1042", Name: "Adebayo Johnson", Age: 34, Status: "Admitted", Ward: "ICU-2", Doctor: "Dr. Success Brownson"},
+			{ID: "P-1043", Name: "Chioma Okoro", Age: 28, Status: "Stable", Ward: "W-4", Doctor: "Dr. Emeka"},
+			{ID: "P-1044", Name: "Musa Ibrahim", Age: 45, Status: "Critical", Ward: "ER-1", Doctor: "Dr. Aisha Bello"},
+			{ID: "P-1045", Name: "Grace Eze", Age: 31, Status: "Admitted", Ward: "W-2", Doctor: "Dr. Success Brownson"},
+		}
+		count := 0
+		for _, p := range seedPatients {
+			_, err := db.Exec("INSERT INTO patients (id,name,age,status,ward,doctor) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING", p.ID, p.Name, p.Age, p.Status, p.Ward, p.Doctor)
+			if err == nil {
+				count++
+			}
+		}
+		json.NewEncoder(w).Encode(map[string]any{"seeded": count, "total": 4, "message": "Now open /api/patients to see data"})
+	})
+
 	handler := cors.AllowAll().Handler(mux)
 	port := os.Getenv("PORT")
 	if port == "" {
