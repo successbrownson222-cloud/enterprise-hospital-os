@@ -4,8 +4,8 @@ import { io, Socket } from "socket.io-client";
 
 type Patient = { id: string; name: string; age: number; status: "Admitted"|"Discharged"|"Critical"|"Stable"; doctor: string; ward: string; avatar: string; date: string; created_at?: string; };
 type Staff = { id: string; name: string; role: string; specialty: string; status: string; };
-type Billing = { id: string; patient: string; patient_id: string; amount: number; status: string; date: string; };
-type AI = { predictions: {patient:string; risk:string; condition:string; confidence:number}[]; bedOccupancy:number; revenueForecast:number; aiStatus:string; };
+type Billing = { id: string; patient: string; patient_id: string; amount: number; status: string; date: string; details?: string; method?: string; };
+type AI = { predictions: {patient:string; risk:string; condition:string; confidence:number; action?:string; vitals?:string}[]; bedOccupancy:number; revenueForecast:number; aiStatus:string; };
 
 const mockData: Patient[] = [
   { id: "P-1042", name: "Adebayo Johnson", age: 34, status: "Admitted", doctor: "Dr. Success Brownson", ward: "ICU-2", avatar: "AJ", date: "08:42" },
@@ -35,8 +35,12 @@ export default function HospitalOSMobile() {
   const [staff, setStaff] = useState<Staff[]>([]);
   const [billing, setBilling] = useState<Billing[]>([]);
   const [aiData, setAiData] = useState<AI|null>(null);
+  const [beds, setBeds] = useState<any[]>([]);
+  const [ambulance, setAmbulance] = useState<any[]>([]);
+  const [equipment, setEquipment] = useState<any[]>([]);
+  const [labs, setLabs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<Patient|null>(null);
+  const [selected, setSelected] = useState<any>(null);
   const [socket, setSocket] = useState<Socket|null>(null);
   const [liveAlert, setLiveAlert] = useState<string|null>(null);
   const [chatOpen, setChatOpen] = useState(false);
@@ -45,12 +49,13 @@ export default function HospitalOSMobile() {
 
   useEffect(() => {
     fetchPatients().then(p => { if(p.length > 0) setPatients(p); setLoading(false); });
-
-    // FETCH ALL TABS - THIS FIXES STATIC ISSUE
     fetch(`${API_URL}/api/staff`, {cache:'no-store'}).then(r=>r.json()).then(d=> { if(Array.isArray(d)) setStaff(d); }).catch(()=>{});
     fetch(`${API_URL}/api/billing`, {cache:'no-store'}).then(r=>r.json()).then(d=> { if(Array.isArray(d)) setBilling(d); }).catch(()=>{});
     fetch(`${API_URL}/api/ai`, {cache:'no-store'}).then(r=>r.json()).then(d=> setAiData(d)).catch(()=>{});
-
+    fetch(`${API_URL}/api/beds`, {cache:'no-store'}).then(r=>r.json()).then(setBeds).catch(()=>{});
+    fetch(`${API_URL}/api/ambulance`, {cache:'no-store'}).then(r=>r.json()).then(setAmbulance).catch(()=>{});
+    fetch(`${API_URL}/api/equipment`, {cache:'no-store'}).then(r=>r.json()).then(setEquipment).catch(()=>{});
+    fetch(`${API_URL}/api/labs`, {cache:'no-store'}).then(r=>r.json()).then(setLabs).catch(()=>{});
     try {
       const s = io(REALTIME_URL, { transports: ['websocket', 'polling'] });
       s.on('connect', () => s.emit('join-ward', 'ICU-2'));
@@ -76,6 +81,10 @@ export default function HospitalOSMobile() {
     {id:"doctors", l:"Staff", i:"◐"},
     {id:"ai", l:"AI Lab", i:"✦"},
     {id:"billing", l:"Billing", i:"₦"},
+    {id:"beds", l:"Beds 🛏️", i:"🛏️"},
+    {id:"ambulance", l:"Ambulance", i:"🚑"},
+    {id:"equipment", l:"Equipment", i:"⚙️"},
+    {id:"labs", l:"Labs", i:"🧪"},
   ];
 
   return (
@@ -95,7 +104,7 @@ export default function HospitalOSMobile() {
         <div style={{display:"flex", alignItems:"center", gap:"10px"}}>
           <button onClick={()=>setMenuOpen(!menuOpen)} className="hide-desktop" style={{width:"40px", height:"40px", borderRadius:"10px", border:"1px solid #e2e8f0", background:"white", fontSize:"18px"}}>☰</button>
           <div style={{width:"32px", height:"32px", background:"linear-gradient(135deg,#3b82f6,#8b5cf6)", borderRadius:"8px", display:"grid", placeItems:"center", color:"white", fontWeight:800}}>H</div>
-          <b>Hospital OS</b>
+          <b>Hospital OS Pro</b>
         </div>
         <div style={{display:"flex", gap:"8px", alignItems:"center"}}>
           <span style={{fontSize:"11px", background: loading ? "#fef3c7" : "#dcfce7", color: loading ? "#d97706" : "#16a34a", padding:"4px 8px", borderRadius:"20px"}}>● {socket?.connected ? "LIVE" : loading ? "SYNCING" : "MOCK"}</span>
@@ -110,7 +119,7 @@ export default function HospitalOSMobile() {
               <button key={n.id} onClick={()=>setActive(n.id)} style={{textAlign:"left", padding:"12px", borderRadius:"10px", border:"none", background: active===n.id ? "#ffffff14" : "transparent", color: active===n.id ? "white" : "#94a3b8", display:"flex", gap:"10px", fontWeight: active===n.id ? 700 : 500, cursor:"pointer"}}>{n.i} {n.l}</button>
             ))}
           </div>
-          <div style={{marginTop:"auto", fontSize:"10px", color:"#475569", padding:"12px"}}>API: {API_URL}<br/>Sock: {socket?.connected ? "Connected" : "Connecting"}</div>
+          <div style={{marginTop:"auto", fontSize:"10px", color:"#475569", padding:"12px"}}>Beds: {beds.filter(b=>b.status==="Available").length} avail<br/>AMB: {ambulance.filter(a=>a.status==="Available").length} ready</div>
         </aside>
 
         {menuOpen && (
@@ -136,7 +145,7 @@ export default function HospitalOSMobile() {
           {active==="dashboard" && (
             <div className="animate-fade">
               <div style={{display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"12px"}}>
-                {[{l:"Patients",v:loading ? "..." : patients.length,c:"#3b82f6"},{l:"Critical",v:patients.filter(p=>p.status==="Critical").length,c:"#ef4444"},{l:"Staff",v:staff.length || 3,c:"#10b981"},{l:"Revenue",v:`₦${(billing.reduce((s,b)=>s+b.amount,0)/1000000).toFixed(1)}M`,c:"#8b5cf6"}].map(card=>(
+                {[{l:"Patients",v:loading ? "..." : patients.length,c:"#3b82f6"},{l:"Avail Beds 🛏️",v:`${beds.filter(b=>b.status==="Available").length}/${beds.length || 8}`,c:"#10b981"},{l:"Ambulance 🚑",v:ambulance.filter(a=>a.status==="Available").length,c:"#ef4444"},{l:"Revenue",v:`₦${(billing.reduce((s,b)=>s+b.amount,0)/1000000).toFixed(1)}M`,c:"#8b5cf6"}].map(card=>(
                   <div key={card.l} style={{background:"white", borderRadius:"16px", padding:"16px", border:"1px solid #e2e8f0"}}>
                     <div style={{fontSize:"11px", color:"#64748b", textTransform:"uppercase"}}>{card.l}</div>
                     <div style={{fontSize:"22px", fontWeight:800, marginTop:"4px"}}>{card.v}</div>
@@ -171,30 +180,29 @@ export default function HospitalOSMobile() {
 
           {active==="doctors" && (
             <div className="animate-fade">
-              <h3 style={{margin:"0 0 12px 4px"}}>Staff On Duty - LIVE from DB</h3>
+              <h3 style={{margin:"0 0 12px 4px"}}>Staff On Duty - LIVE</h3>
               <div style={{display:"flex", flexDirection:"column", gap:"10px"}}>
                 {staff.map(s=>(
-                  <div key={s.id} style={{background:"white", borderRadius:"14px", padding:"16px", border:"1px solid #e2e8f0", display:"flex", gap:"12px", alignItems:"center"}}>
+                  <div key={s.id} onClick={()=>setSelected(s)} style={{background:"white", borderRadius:"14px", padding:"16px", border:"1px solid #e2e8f0", display:"flex", gap:"12px", alignItems:"center", cursor:"pointer"}}>
                     <div style={{width:"44px", height:"44px", borderRadius:"12px", background:"#0a0f1e", color:"white", display:"grid", placeItems:"center", fontWeight:700}}>{s.name.split(" ").map(n=>n[0]).join("").slice(0,2)}</div>
                     <div style={{flex:1}}><div style={{fontWeight:600}}>{s.name}</div><div style={{fontSize:"12px", color:"#64748b"}}>{s.role} • {s.specialty}</div></div>
                     <span style={{fontSize:"10px", padding:"4px 8px", borderRadius:"20px", background: s.status==="On Duty" ? "#dcfce7" : "#fee2e2"}}>{s.status}</span>
                   </div>
                 ))}
-                {staff.length===0 && <div style={{background:"white", padding:"20px", borderRadius:"14px", textAlign:"center", color:"#64748b"}}>Loading staff from /api/staff...</div>}
               </div>
             </div>
           )}
 
           {active==="billing" && (
             <div className="animate-fade">
-              <h3 style={{margin:"0 0 12px 4px"}}>Billing - LIVE ₦{billing.reduce((s,b)=>s+b.amount,0).toLocaleString()}</h3>
+              <h3 style={{margin:"0 0 12px 4px"}}>Billing - Tap to view details 💳</h3>
               <div style={{display:"flex", flexDirection:"column", gap:"10px"}}>
                 {billing.map(b=>(
-                  <div key={b.id} style={{background:"white", borderRadius:"14px", padding:"16px", border:"1px solid #e2e8f0"}}>
+                  <div key={b.id} onClick={()=>setSelected(b)} style={{background:"white", borderRadius:"14px", padding:"16px", border:"1px solid #e2e8f0", cursor:"pointer"}}>
                     <div style={{display:"flex", justifyContent:"space-between"}}><b style={{fontSize:"14px"}}>{b.id}</b><span style={{fontSize:"10px", padding:"4px 8px", borderRadius:"20px", background: b.status==="Paid" ? "#dcfce7" : "#fef3c7"}}>{b.status}</span></div>
                     <div style={{fontSize:"13px", marginTop:"6px"}}>{b.patient} ({b.patient_id})</div>
                     <div style={{fontWeight:800, marginTop:"4px"}}>₦{b.amount.toLocaleString()}</div>
-                    <div style={{fontSize:"11px", color:"#64748b"}}>{b.date}</div>
+                    <div style={{fontSize:"11px", color:"#3b82f6"}}>Tap for payment details →</div>
                   </div>
                 ))}
               </div>
@@ -203,7 +211,7 @@ export default function HospitalOSMobile() {
 
           {active==="ai" && (
             <div className="animate-fade">
-              <h3 style={{margin:"0 0 12px 4px"}}>AI Lab - LIVE Predictions</h3>
+              <h3 style={{margin:"0 0 12px 4px"}}>AI Lab - Tap for action plan ✦</h3>
               {aiData ? (
                 <div style={{display:"flex", flexDirection:"column", gap:"12px"}}>
                   <div style={{display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"10px"}}>
@@ -211,25 +219,85 @@ export default function HospitalOSMobile() {
                     <div style={{background:"white", borderRadius:"14px", padding:"16px", border:"1px solid #e2e8f0"}}><div style={{fontSize:"11px", color:"#64748b"}}>AI STATUS</div><div style={{fontSize:"14px", fontWeight:700, color:"#16a34a"}}>● {aiData.aiStatus}</div></div>
                   </div>
                   {aiData.predictions.map((pred,i)=>(
-                    <div key={i} style={{background:"white", borderRadius:"14px", padding:"16px", border:"1px solid #e2e8f0", borderLeft:`4px solid ${pred.risk==="High" ? "#ef4444" : pred.risk==="Medium" ? "#f59e0b" : "#10b981"}`}}>
+                    <div key={i} onClick={()=>setSelected(pred)} style={{background:"white", borderRadius:"14px", padding:"16px", border:"1px solid #e2e8f0", borderLeft:`4px solid ${pred.risk==="High" ? "#ef4444" : pred.risk==="Medium" ? "#f59e0b" : "#10b981"}`, cursor:"pointer"}}>
                       <div style={{display:"flex", justifyContent:"space-between"}}><b style={{fontSize:"13px"}}>{pred.patient}</b><span style={{fontSize:"10px", padding:"4px 8px", borderRadius:"20px", background: pred.risk==="High" ? "#fee2e2" : pred.risk==="Medium" ? "#fef3c7" : "#dcfce7"}}>{pred.risk} RISK</span></div>
                       <div style={{fontSize:"12px", color:"#64748b", marginTop:"6px"}}>{pred.condition} — {pred.confidence}% confidence</div>
+                      <div style={{fontSize:"11px", color:"#3b82f6", marginTop:"4px"}}>Tap to view vitals & action →</div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div style={{background:"white", padding:"20px", borderRadius:"14px", textAlign:"center", color:"#64748b"}}>Loading AI from /api/ai...</div>
+                <div style={{background:"white", padding:"20px", borderRadius:"14px", textAlign:"center", color:"#64748b"}}>Loading AI...</div>
               )}
+            </div>
+          )}
+
+          {active==="beds" && (
+            <div className="animate-fade">
+              <h3>🛏️ Available Beds - Tap to assign</h3>
+              <div style={{display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"12px", marginTop:"12px"}}>
+                {beds.map(b=>(
+                  <div key={b.id} onClick={()=>setSelected(b)} style={{background:"white", padding:"16px", borderRadius:"14px", border:"1px solid #e2e8f0", borderLeft:`4px solid ${b.status==="Available"?"#10b981":b.status==="Occupied"?"#ef4444":"#f59e0b"}`, cursor:"pointer"}}>
+                    <b>{b.id}</b><div style={{fontSize:"12px", color:"#64748b"}}>{b.ward} • {b.type}</div>
+                    <div style={{marginTop:"8px", fontSize:"11px", padding:"4px 8px", borderRadius:"20px", background:b.status==="Available"?"#dcfce7":"#fee2e2", display:"inline-block"}}>{b.status}</div>
+                    {b.patient && <div style={{fontSize:"11px", marginTop:"4px"}}>{b.patient}</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {active==="ambulance" && (
+            <div className="animate-fade">
+              <h3>🚑 Ambulance Fleet - Tap to dispatch</h3>
+              {ambulance.map(a=>(
+                <div key={a.id} onClick={()=>setSelected(a)} style={{background:"white", marginTop:"12px", padding:"16px", borderRadius:"14px", border:"1px solid #e2e8f0", cursor:"pointer"}}>
+                  <div style={{display:"flex", justifyContent:"space-between"}}><b>{a.id}</b><span style={{fontSize:"11px", padding:"4px 8px", borderRadius:"20px", background:a.status==="Available"?"#dcfce7":"#fef3c7"}}>{a.status}</span></div>
+                  <div style={{fontSize:"12px", color:"#64748b", marginTop:"6px"}}>📍 {a.location} • ETA {a.eta} • {a.driver} • {a.plate}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+                    {active==="equipment" && (
+            <div className="animate-fade">
+              <h3>⚙️ Medical Equipment</h3>
+              {equipment.map(e=>(
+                <div key={e.id} onClick={()=>setSelected(e)} style={{background:"white", marginTop:"12px", padding:"16px", borderRadius:"14px", border:"1px solid #e2e8f0", cursor:"pointer"}}>
+                  <b>{e.name}</b>
+                  <div style={{fontSize:"12px", color:"#64748b"}}>{e.id} • {e.ward}</div>
+                  <div style={{display:"flex", justifyContent:"space-between", marginTop:"8px"}}>
+                    <span style={{fontSize:"11px", padding:"4px 8px", borderRadius:"20px", background:e.status==="Available"?"#dcfce7":e.status==="In Use"?"#dbeafe":"#fef3c7"}}>{e.status}</span>
+                    <span style={{fontSize:"11px"}}>Next: {e.nextService}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {active==="labs" && (
+            <div className="animate-fade">
+              <h3>🧪 Laboratory</h3>
+              {labs.map(l=>(
+                <div key={l.id} onClick={()=>setSelected(l)} style={{background:"white", marginTop:"12px", padding:"16px", borderRadius:"14px", border:"1px solid #e2e8f0", cursor:"pointer"}}>
+                  <div style={{display:"flex", justifyContent:"space-between"}}>
+                    <b>{l.id}</b>
+                    <span style={{fontSize:"11px", padding:"4px 8px", borderRadius:"20px", background:l.status==="Completed"?"#dcfce7":"#fef3c7"}}>{l.status}</span>
+                  </div>
+                  <div style={{fontSize:"13px", marginTop:"6px"}}>{l.patient} - {l.test}</div>
+                  <div style={{fontSize:"11px", color:"#3b82f6"}}>Tap to see result →</div>
+                </div>
+              ))}
             </div>
           )}
         </main>
       </div>
 
-      <div className="hide-desktop" style={{position:"fixed", bottom:0, left:0, right:0, background:"rgba(255,255,255,0.95)", backdropFilter:"blur(20px)", borderTop:"1px solid #e2e8f0", display:"flex", justifyContent:"space-around", padding:"8px 0 calc(8px + env(safe-area-inset-bottom))", zIndex:20}}>
-        {nav.slice(0,5).map(n=>(
-          <button key={n.id} onClick={()=>setActive(n.id)} style={{background:"none", border:"none", display:"flex", flexDirection:"column", alignItems:"center", gap:"2px", color: active===n.id ? "#0a0f1e" : "#94a3b8", cursor:"pointer"}}>
-            <span style={{fontSize:"20px", background: active===n.id ? "#0a0f1e" : "transparent", color: active===n.id ? "white" : "#94a3b8", width:"36px", height:"28px", borderRadius:"10px", display:"grid", placeItems:"center"}}>{n.i}</span>
-            <span style={{fontSize:"10px", fontWeight: active===n.id ? 700 : 400}}>{n.l}</span>
+      <div className="hide-desktop" style={{position:"fixed", bottom:0, left:0, right:0, background:"rgba(255,255,255,0.95)", backdropFilter:"blur(20px)", borderTop:"1px solid #e2e8f0", display:"flex", justifyContent:"space-around", padding:"8px 0 calc(8px + env(safe-area-inset-bottom))", zIndex:20, overflowX:"auto"}}>
+        {nav.map(n=>(
+          <button key={n.id} onClick={()=>setActive(n.id)} style={{background:"none", border:"none", display:"flex", flexDirection:"column", alignItems:"center", gap:"2px", color: active===n.id ? "#0a0f1e" : "#94a3b8", cursor:"pointer", minWidth:"56px"}}>
+            <span style={{fontSize:"18px", background: active===n.id ? "#0a0f1e" : "transparent", color: active===n.id ? "white" : "#94a3b8", width:"32px", height:"26px", borderRadius:"10px", display:"grid", placeItems:"center"}}>{n.i}</span>
+            <span style={{fontSize:"9px", fontWeight: active===n.id ? 700 : 400}}>{n.l.split(" ")[0]}</span>
           </button>
         ))}
       </div>
@@ -254,16 +322,18 @@ export default function HospitalOSMobile() {
             </div>
           </div>
         ) : (
-                   <button onClick={()=>setChatOpen(true)} style={{width:"56px", height:"56px", borderRadius:"50%", background:"#0a0f1e", color:"white", border:"none", fontSize:"24px", boxShadow:"0 8px 20px rgba(0,0,0,0.2)", cursor:"pointer"}}>💬</button>
+          <button onClick={()=>setChatOpen(true)} style={{width:"56px", height:"56px", borderRadius:"50%", background:"#0a0f1e", color:"white", border:"none", fontSize:"24px", boxShadow:"0 8px 20px rgba(0,0,0,0.2)", cursor:"pointer"}}>💬</button>
         )}
       </div>
 
       {selected && (
         <div onClick={()=>setSelected(null)} style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", backdropFilter:"blur(6px)", display:"grid", placeItems:"center", zIndex:50, padding:"16px"}}>
           <div onClick={e=>e.stopPropagation()} className="animate-fade" style={{background:"white", borderRadius:"20px", padding:"20px", width:"100%", maxWidth:"360px"}}>
-            <div style={{display:"flex", justifyContent:"space-between"}}><h3 style={{margin:0}}>{selected.name}</h3><button onClick={()=>setSelected(null)} style={{border:"none", background:"#f1f5f9", width:"32px", height:"32px", borderRadius:"10px", cursor:"pointer"}}>✕</button></div>
-            <div style={{marginTop:"16px", background:"#f8fafc", borderRadius:"12px", padding:"12px", fontSize:"13px", lineHeight:1.8}}>ID: <b>{selected.id}</b><br/>Ward: {selected.ward}<br/>Doctor: {selected.doctor}<br/>Status: {selected.status}</div>
-            <button style={{marginTop:"14px", width:"100%", padding:"14px", background:"#0a0f1e", color:"white", borderRadius:"12px", border:"none", fontWeight:700, cursor:"pointer"}} onClick={()=>setSelected(null)}>Close</button>
+            <div style={{display:"flex", justifyContent:"space-between"}}><h3 style={{margin:0}}>Details View</h3><button onClick={()=>setSelected(null)} style={{border:"none", background:"#f1f5f9", width:"32px", height:"32px", borderRadius:"10px", cursor:"pointer"}}>✕</button></div>
+            <div style={{marginTop:"16px", background:"#f8fafc", borderRadius:"12px", padding:"12px", fontSize:"13px", lineHeight:1.9, maxHeight:"300px", overflowY:"auto"}}>
+              {Object.entries(selected).map(([k,v]:any)=><div key={k}><b>{k}:</b> {String(v)}</div>)}
+            </div>
+            <button style={{marginTop:"14px", width:"100%", padding:"14px", background:"#0a0f1e", color:"white", borderRadius:"12px", border:"none", fontWeight:700, cursor:"pointer"}} onClick={()=>{ if(selected.id?.startsWith("B-")) alert(`Assigning ${selected.id}`); if(selected.id?.startsWith("AMB-")) alert(`Dispatching ${selected.id}`); setSelected(null); }}>Take Action / Close</button>
           </div>
         </div>
       )}
