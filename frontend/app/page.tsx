@@ -2,7 +2,10 @@
 import { useState, useMemo, useEffect } from "react";
 import { io, Socket } from "socket.io-client";
 
-type Patient = { id: string; name: string; age: number; status: "Admitted"|"Discharged"|"Critical"|"Stable"; doctor: string; ward: string; avatar: string; date: string; };
+type Patient = { id: string; name: string; age: number; status: "Admitted"|"Discharged"|"Critical"|"Stable"; doctor: string; ward: string; avatar: string; date: string; created_at?: string; };
+type Staff = { id: string; name: string; role: string; specialty: string; status: string; };
+type Billing = { id: string; patient: string; patient_id: string; amount: number; status: string; date: string; };
+type AI = { predictions: {patient:string; risk:string; condition:string; confidence:number}[]; bedOccupancy:number; revenueForecast:number; aiStatus:string; };
 
 const mockData: Patient[] = [
   { id: "P-1042", name: "Adebayo Johnson", age: 34, status: "Admitted", doctor: "Dr. Success Brownson", ward: "ICU-2", avatar: "AJ", date: "08:42" },
@@ -10,24 +13,17 @@ const mockData: Patient[] = [
   { id: "P-1044", name: "Musa Ibrahim", age: 45, status: "Critical", doctor: "Dr. Aisha Bello", ward: "ER-1", avatar: "MI", date: "10:03" },
 ];
 
-// WORKS EVEN IF VERCEL ENV FAILS
 const API_URL = (process.env as any).NEXT_PUBLIC_API_URL || (process.env as any).API_URL || "https://enterprise-hospital-os.onrender.com";
-const AI_URL = (process.env as any).NEXT_PUBLIC_AI_API_URL || (process.env as any).AI_API_URL || "https://hospital-os-ai-python.onrender.com";
-const REALTIME_URL = (process.env as any).NEXT_PUBLIC_REALTIME_URL || (process.env as any).REALTIME_URL || "https://hospital-os-realtime.onrender.com";
+const REALTIME_URL = (process.env as any).NEXT_PUBLIC_REALTIME_URL || "https://hospital-os-realtime.onrender.com";
 
 async function fetchPatients(): Promise<Patient[]> {
-  const urlsToTry = [`${API_URL}/api/patients`, `${API_URL}/patients`, `${API_URL}/api/patient`, `${API_URL}/health`];
-  for(const url of urlsToTry){
-    try {
-      const res = await fetch(url, { cache: 'no-store' });
-      if (!res.ok) continue;
-      const json = await res.json();
-      const list = json.patients || json.data || json;
-      if(Array.isArray(list) && list.length > 0) return list;
-      if(Array.isArray(json) && json.length > 0) return json;
-    } catch(e) {}
-  }
-  console.log("All API attempts failed, using mock");
+  try {
+    const res = await fetch(`${API_URL}/api/patients`, { cache: 'no-store' });
+    if (!res.ok) throw new Error("fail");
+    const json = await res.json();
+    const list = json.patients || json.data || json;
+    if(Array.isArray(list) && list.length > 0) return list.map((p:any)=> ({...p, avatar: p.avatar || p.name?.slice(0,2).toUpperCase() || "PA", date: p.date || new Date(p.created_at).toLocaleTimeString()}));
+  } catch(e) {}
   return mockData;
 }
 
@@ -36,51 +32,38 @@ export default function HospitalOSMobile() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [q, setQ] = useState("");
   const [patients, setPatients] = useState<Patient[]>(mockData);
+  const [staff, setStaff] = useState<Staff[]>([]);
+  const [billing, setBilling] = useState<Billing[]>([]);
+  const [aiData, setAiData] = useState<AI|null>(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Patient|null>(null);
   const [socket, setSocket] = useState<Socket|null>(null);
   const [liveAlert, setLiveAlert] = useState<string|null>(null);
-  
-  // CHAT STATES
   const [chatOpen, setChatOpen] = useState(false);
-  const [messages, setMessages] = useState<{user:string,text:string}[]>([
-    {user:"System", text:"ICU-2 ward live — type to chat with staff"}
-  ]);
+  const [messages, setMessages] = useState<{user:string,text:string}[]>([{user:"System", text:"ICU-2 ward live — type to chat"}]);
   const [chatInput, setChatInput] = useState("");
 
   useEffect(() => {
-    console.log("API:", API_URL, "REALTIME:", REALTIME_URL);
-    fetchPatients().then(p => {
-      if(p.length > 0) setPatients(p);
-      setLoading(false);
-    });
+    fetchPatients().then(p => { if(p.length > 0) setPatients(p); setLoading(false); });
+
+    // FETCH ALL TABS - THIS FIXES STATIC ISSUE
+    fetch(`${API_URL}/api/staff`, {cache:'no-store'}).then(r=>r.json()).then(d=> { if(Array.isArray(d)) setStaff(d); }).catch(()=>{});
+    fetch(`${API_URL}/api/billing`, {cache:'no-store'}).then(r=>r.json()).then(d=> { if(Array.isArray(d)) setBilling(d); }).catch(()=>{});
+    fetch(`${API_URL}/api/ai`, {cache:'no-store'}).then(r=>r.json()).then(d=> setAiData(d)).catch(()=>{});
 
     try {
       const s = io(REALTIME_URL, { transports: ['websocket', 'polling'] });
-      s.on('connect', () => {
-        console.log("Socket LIVE connected");
-        s.emit('join-ward', 'ICU-2');
-      });
-      s.on('critical-patient', (d: any) => {
-        setLiveAlert(`🚨 ${d.patient_id || 'Patient'} Critical in ${d.ward || 'ICU'}`);
-        setTimeout(()=>setLiveAlert(null), 5000);
-      });
-      s.on('ward-message', (d: any) => {
-        setMessages(prev => [...prev, {user: d.user || 'Doctor', text: d.text || d.message}]);
-      });
-      s.on('connect_error', (err) => console.log("Socket error - is realtime service sleeping on Render?", err.message));
+      s.on('connect', () => s.emit('join-ward', 'ICU-2'));
+      s.on('critical-patient', (d: any) => { setLiveAlert(`🚨 ${d.patient_id || 'Patient'} Critical`); setTimeout(()=>setLiveAlert(null), 5000); });
+      s.on('ward-message', (d: any) => setMessages(prev => [...prev, {user: d.user || 'Doctor', text: d.text || d.message}]));
       setSocket(s);
       return () => { s.disconnect(); }
-    } catch(err) {
-      console.log("Socket init failed", err);
-    }
+    } catch(err) {}
   }, []);
 
   const sendMessage = () => {
     if(!chatInput.trim()) return;
-    if(socket?.connected){
-      socket.emit('ward-message', { ward: 'ICU-2', user: 'SB', text: chatInput });
-    }
+    if(socket?.connected) socket.emit('ward-message', { ward: 'ICU-2', user: 'SB', text: chatInput });
     setMessages(prev => [...prev, {user:"You", text: chatInput}]);
     setChatInput("");
   }
@@ -106,11 +89,7 @@ export default function HospitalOSMobile() {
         @media (max-width: 767px) { .show-desktop { display:none !important; } }
       `}</style>
 
-      {liveAlert && (
-        <div style={{position:"fixed", top:"62px", left:"16px", right:"16px", background:"#ef4444", color:"white", padding:"12px", borderRadius:"12px", zIndex:100, textAlign:"center", fontWeight:700}}>
-          {liveAlert}
-        </div>
-      )}
+      {liveAlert && <div style={{position:"fixed", top:"62px", left:"16px", right:"16px", background:"#ef4444", color:"white", padding:"12px", borderRadius:"12px", zIndex:100, textAlign:"center", fontWeight:700}}>{liveAlert}</div>}
 
       <header style={{height:"56px", background:"rgba(255,255,255,0.9)", backdropFilter:"blur(12px)", borderBottom:"1px solid #e2e8f0", display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 16px", position:"sticky", top:0, zIndex:20}}>
         <div style={{display:"flex", alignItems:"center", gap:"10px"}}>
@@ -157,7 +136,7 @@ export default function HospitalOSMobile() {
           {active==="dashboard" && (
             <div className="animate-fade">
               <div style={{display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"12px"}}>
-                {[{l:"Patients",v:loading ? "..." : filtered.length+132,c:"#3b82f6"},{l:"Critical",v:3,c:"#ef4444"},{l:"Today",v:"24",c:"#10b981"},{l:"Revenue",v:"₦4.2M",c:"#8b5cf6"}].map(card=>(
+                {[{l:"Patients",v:loading ? "..." : patients.length,c:"#3b82f6"},{l:"Critical",v:patients.filter(p=>p.status==="Critical").length,c:"#ef4444"},{l:"Staff",v:staff.length || 3,c:"#10b981"},{l:"Revenue",v:`₦${(billing.reduce((s,b)=>s+b.amount,0)/1000000).toFixed(1)}M`,c:"#8b5cf6"}].map(card=>(
                   <div key={card.l} style={{background:"white", borderRadius:"16px", padding:"16px", border:"1px solid #e2e8f0"}}>
                     <div style={{fontSize:"11px", color:"#64748b", textTransform:"uppercase"}}>{card.l}</div>
                     <div style={{fontSize:"22px", fontWeight:800, marginTop:"4px"}}>{card.v}</div>
@@ -166,7 +145,7 @@ export default function HospitalOSMobile() {
                 ))}
               </div>
               <div style={{marginTop:"16px", background:"white", borderRadius:"16px", padding:"16px", border:"1px solid #e2e8f0"}}>
-                <div style={{display:"flex", justifyContent:"space-between", marginBottom:"12px"}}><b>Recent {loading && "(syncing...)"}</b><button onClick={()=>setActive("patients")} style={{color:"#3b82f6", background:"none", border:"none", fontSize:"13px"}}>See all</button></div>
+                <div style={{display:"flex", justifyContent:"space-between", marginBottom:"12px"}}><b>Recent</b><button onClick={()=>setActive("patients")} style={{color:"#3b82f6", background:"none", border:"none", fontSize:"13px"}}>See all</button></div>
                 {filtered.map(p=>(
                   <div key={p.id} onClick={()=>setSelected(p)} style={{display:"flex", gap:"12px", padding:"12px", borderRadius:"12px", alignItems:"center", cursor:"pointer"}}>
                     <div style={{width:"44px", height:"44px", borderRadius:"12px", background:"#0a0f1e", color:"white", display:"grid", placeItems:"center", fontWeight:700}}>{p.avatar}</div>
@@ -190,18 +169,57 @@ export default function HospitalOSMobile() {
             </div>
           )}
 
-          {active!=="dashboard" && active!=="patients" && (
-            <div className="animate-fade" style={{background:"white", borderRadius:"16px", padding:"32px", textAlign:"center", border:"1px solid #e2e8f0"}}>
-              <div style={{fontSize:"32px", marginBottom:"8px"}}>{nav.find(n=>n.id===active)?.i}</div><h3 style={{textTransform:"capitalize", margin:0}}>{active}</h3><p style={{color:"#64748b", fontSize:"13px", marginTop:"6px", wordBreak:"break-all"}}>API: {active==="ai" ? AI_URL : API_URL}</p>
-              <button onClick={async()=>{
-                const url = active==="ai" ? `${AI_URL}/docs` : active==="billing" ? `${API_URL}/api/billing` : `${API_URL}/health`;
-                try{ 
-                  const r = await fetch(url); 
-                  const t = await r.text();
-                  alert(r.ok ? `${active} LIVE! ${t.slice(0,100)}` : `Status ${r.status}: ${t.slice(0,100)}`); 
-                } catch(e:any){ alert("Cannot reach: " + url + " - " + e.message); }
-              }} style={{marginTop:"16px", padding:"12px 18px", background:"#0a0f1e", color:"white", borderRadius:"12px", border:"none", width:"100%", cursor:"pointer"}}>Test {active} API</button>
-              <p style={{fontSize:"11px", color:"#94a3b8", marginTop:"12px"}}>If fail, your Go backend needs CORS: go get github.com/rs/cors</p>
+          {active==="doctors" && (
+            <div className="animate-fade">
+              <h3 style={{margin:"0 0 12px 4px"}}>Staff On Duty - LIVE from DB</h3>
+              <div style={{display:"flex", flexDirection:"column", gap:"10px"}}>
+                {staff.map(s=>(
+                  <div key={s.id} style={{background:"white", borderRadius:"14px", padding:"16px", border:"1px solid #e2e8f0", display:"flex", gap:"12px", alignItems:"center"}}>
+                    <div style={{width:"44px", height:"44px", borderRadius:"12px", background:"#0a0f1e", color:"white", display:"grid", placeItems:"center", fontWeight:700}}>{s.name.split(" ").map(n=>n[0]).join("").slice(0,2)}</div>
+                    <div style={{flex:1}}><div style={{fontWeight:600}}>{s.name}</div><div style={{fontSize:"12px", color:"#64748b"}}>{s.role} • {s.specialty}</div></div>
+                    <span style={{fontSize:"10px", padding:"4px 8px", borderRadius:"20px", background: s.status==="On Duty" ? "#dcfce7" : "#fee2e2"}}>{s.status}</span>
+                  </div>
+                ))}
+                {staff.length===0 && <div style={{background:"white", padding:"20px", borderRadius:"14px", textAlign:"center", color:"#64748b"}}>Loading staff from /api/staff...</div>}
+              </div>
+            </div>
+          )}
+
+          {active==="billing" && (
+            <div className="animate-fade">
+              <h3 style={{margin:"0 0 12px 4px"}}>Billing - LIVE ₦{billing.reduce((s,b)=>s+b.amount,0).toLocaleString()}</h3>
+              <div style={{display:"flex", flexDirection:"column", gap:"10px"}}>
+                {billing.map(b=>(
+                  <div key={b.id} style={{background:"white", borderRadius:"14px", padding:"16px", border:"1px solid #e2e8f0"}}>
+                    <div style={{display:"flex", justifyContent:"space-between"}}><b style={{fontSize:"14px"}}>{b.id}</b><span style={{fontSize:"10px", padding:"4px 8px", borderRadius:"20px", background: b.status==="Paid" ? "#dcfce7" : "#fef3c7"}}>{b.status}</span></div>
+                    <div style={{fontSize:"13px", marginTop:"6px"}}>{b.patient} ({b.patient_id})</div>
+                    <div style={{fontWeight:800, marginTop:"4px"}}>₦{b.amount.toLocaleString()}</div>
+                    <div style={{fontSize:"11px", color:"#64748b"}}>{b.date}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {active==="ai" && (
+            <div className="animate-fade">
+              <h3 style={{margin:"0 0 12px 4px"}}>AI Lab - LIVE Predictions</h3>
+              {aiData ? (
+                <div style={{display:"flex", flexDirection:"column", gap:"12px"}}>
+                  <div style={{display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"10px"}}>
+                    <div style={{background:"white", borderRadius:"14px", padding:"16px", border:"1px solid #e2e8f0"}}><div style={{fontSize:"11px", color:"#64748b"}}>BED OCCUPANCY</div><div style={{fontSize:"22px", fontWeight:800}}>{aiData.bedOccupancy}%</div></div>
+                    <div style={{background:"white", borderRadius:"14px", padding:"16px", border:"1px solid #e2e8f0"}}><div style={{fontSize:"11px", color:"#64748b"}}>AI STATUS</div><div style={{fontSize:"14px", fontWeight:700, color:"#16a34a"}}>● {aiData.aiStatus}</div></div>
+                  </div>
+                  {aiData.predictions.map((pred,i)=>(
+                    <div key={i} style={{background:"white", borderRadius:"14px", padding:"16px", border:"1px solid #e2e8f0", borderLeft:`4px solid ${pred.risk==="High" ? "#ef4444" : pred.risk==="Medium" ? "#f59e0b" : "#10b981"}`}}>
+                      <div style={{display:"flex", justifyContent:"space-between"}}><b style={{fontSize:"13px"}}>{pred.patient}</b><span style={{fontSize:"10px", padding:"4px 8px", borderRadius:"20px", background: pred.risk==="High" ? "#fee2e2" : pred.risk==="Medium" ? "#fef3c7" : "#dcfce7"}}>{pred.risk} RISK</span></div>
+                      <div style={{fontSize:"12px", color:"#64748b", marginTop:"6px"}}>{pred.condition} — {pred.confidence}% confidence</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{background:"white", padding:"20px", borderRadius:"14px", textAlign:"center", color:"#64748b"}}>Loading AI from /api/ai...</div>
+              )}
             </div>
           )}
         </main>
@@ -216,12 +234,11 @@ export default function HospitalOSMobile() {
         ))}
       </div>
 
-      {/* LIVE CHAT WIDGET - THIS WAS MISSING */}
       <div style={{position:"fixed", bottom:"90px", right:"16px", zIndex:40}}>
         {chatOpen ? (
           <div className="animate-fade" style={{width:"320px", height:"380px", background:"white", borderRadius:"16px", border:"1px solid #e2e8f0", boxShadow:"0 10px 30px rgba(0,0,0,0.15)", display:"flex", flexDirection:"column", overflow:"hidden"}}>
             <div style={{padding:"12px", background:"#0a0f1e", color:"white", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
-              <b style={{fontSize:"13px"}}>💬 ICU-2 Live {socket?.connected ? "● LIVE" : "○ Connecting"}</b>
+              <b style={{fontSize:"13px"}}>💬 ICU-2 Live {socket?.connected ? "● LIVE" : "○"}</b>
               <button onClick={()=>setChatOpen(false)} style={{background:"#ffffff20", border:"none", color:"white", width:"28px", height:"28px", borderRadius:"8px", cursor:"pointer"}}>✕</button>
             </div>
             <div style={{flex:1, overflowY:"auto", padding:"12px", display:"flex", flexDirection:"column", gap:"8px", background:"#f8fafc"}}>
@@ -237,7 +254,7 @@ export default function HospitalOSMobile() {
             </div>
           </div>
         ) : (
-          <button onClick={()=>setChatOpen(true)} style={{width:"56px", height:"56px", borderRadius:"50%", background:"#0a0f1e", color:"white", border:"none", fontSize:"24px", boxShadow:"0 8px 20px rgba(0,0,0,0.2)", cursor:"pointer"}}>💬</button>
+                   <button onClick={()=>setChatOpen(true)} style={{width:"56px", height:"56px", borderRadius:"50%", background:"#0a0f1e", color:"white", border:"none", fontSize:"24px", boxShadow:"0 8px 20px rgba(0,0,0,0.2)", cursor:"pointer"}}>💬</button>
         )}
       </div>
 
