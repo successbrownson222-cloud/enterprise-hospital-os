@@ -58,9 +58,10 @@ func main() {
 				return
 			}
 			rows, _ := db.Query("SELECT id,name,age,status,ward,doctor,created_at FROM patients ORDER BY created_at DESC")
+			if rows == nil { json.NewEncoder(w).Encode([]Patient{}); return }
 			defer rows.Close()
 			list := []Patient{}
-			for rows.Next() { var p Patient; rows.Scan(&p.ID, &p.Name, &p.Age, &p.Status, &p.Ward, &p.Doctor, &p.CreatedAt); list = append(list, p) }
+			for rows.Next() { var p Patient; rows.Scan(&p.ID, &p.Name, &p.Age, &p.Status, &p.Ward, &p.Doctor, &p.CreatedAt); p.Avatar = string([]rune(p.Name)[:2]); list = append(list, p) }
 			json.NewEncoder(w).Encode(list)
 			return
 		}
@@ -73,24 +74,21 @@ func main() {
 		}
 	})
 
-	// === THE 3 MISSING ENDPOINTS THAT MAKE YOUR TABS LIVE ===
 	mux.HandleFunc("/api/staff", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		if db == nil {
-			json.NewEncoder(w).Encode([]map[string]string{{"id": "S-1", "name": "Dr. Success Brownson", "role": "Doctor", "specialty": "ICU", "status": "On Duty"}})
-			return
+		list := []map[string]string{
+			{"id": "S-1", "name": "Dr. Success Brownson", "role": "Doctor", "specialty": "ICU", "status": "On Duty"},
+			{"id": "S-2", "name": "Dr. Aisha Bello", "role": "Nurse", "specialty": "ER", "status": "On Duty"},
+			{"id": "S-3", "name": "Dr. Emeka", "role": "Doctor", "specialty": "General", "status": "Off Duty"},
 		}
-		rows, _ := db.Query("SELECT id,name,role,specialty,status FROM staff ORDER BY created_at DESC")
-		if rows == nil {
-			json.NewEncoder(w).Encode([]map[string]string{{"id": "S-1", "name": "Dr. Success Brownson", "role": "Doctor", "specialty": "ICU", "status": "On Duty"}, {"id": "S-2", "name": "Dr. Emeka", "role": "Doctor", "specialty": "General", "status": "On Duty"}})
-			return
-		}
-		defer rows.Close()
-		list := []map[string]string{}
-		for rows.Next() { var id, name, role, specialty, status string; rows.Scan(&id, &name, &role, &specialty, &status); list = append(list, map[string]string{"id": id, "name": name, "role": role, "specialty": specialty, "status": status}) }
-		if len(list) == 0 {
-			list = []map[string]string{{"id": "S-1", "name": "Dr. Success Brownson", "role": "Doctor", "specialty": "ICU", "status": "On Duty"}, {"id": "S-2", "name": "Dr. Aisha Bello", "role": "Nurse", "specialty": "ER", "status": "On Duty"}, {"id": "S-3", "name": "Dr. Emeka", "role": "Doctor", "specialty": "General", "status": "Off Duty"}}
+		if db != nil {
+			if rows, err := db.Query("SELECT id,name,role,specialty,status FROM staff ORDER BY created_at DESC"); err == nil && rows != nil {
+				defer rows.Close()
+				tmp := []map[string]string{}
+				for rows.Next() { var id, name, role, specialty, status string; rows.Scan(&id, &name, &role, &specialty, &status); tmp = append(tmp, map[string]string{"id": id, "name": name, "role": role, "specialty": specialty, "status": status}) }
+				if len(tmp) > 0 { list = tmp }
+			}
 		}
 		json.NewEncoder(w).Encode(list)
 	})
@@ -99,10 +97,10 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		json.NewEncoder(w).Encode([]map[string]any{
-			{"id": "INV-001", "patient": "Adebayo Johnson", "patient_id": "P-1042", "amount": 450000, "status": "Paid", "date": time.Now().Format("2006-01-02")},
-			{"id": "INV-002", "patient": "Chioma Okoro", "patient_id": "P-1043", "amount": 120000, "status": "Pending", "date": time.Now().Format("2006-01-02")},
-			{"id": "INV-003", "patient": "Musa Ibrahim", "patient_id": "P-1044", "amount": 890000, "status": "Paid", "date": time.Now().Format("2006-01-02")},
-			{"id": "INV-004", "patient": "Grace Eze", "patient_id": "P-1045", "amount": 230000, "status": "Paid", "date": time.Now().Format("2006-01-02")},
+			{"id": "INV-001", "patient": "Adebayo Johnson", "patient_id": "P-1042", "amount": 450000, "status": "Paid", "date": time.Now().Format("2006-01-02"), "details": "ICU 3 days + Ventilator + Labs", "method": "Transfer"},
+			{"id": "INV-002", "patient": "Chioma Okoro", "patient_id": "P-1043", "amount": 120000, "status": "Pending", "date": time.Now().Format("2006-01-02"), "details": "Ward W-4 + CBC Lab", "method": "Cash"},
+			{"id": "INV-003", "patient": "Musa Ibrahim", "patient_id": "P-1044", "amount": 890000, "status": "Paid", "date": time.Now().Format("2006-01-02"), "details": "ER + CT Scan + Emergency", "method": "Card"},
+			{"id": "INV-004", "patient": "Grace Eze", "patient_id": "P-1045", "amount": 230000, "status": "Paid", "date": time.Now().Format("2006-01-02"), "details": "W-2 + Monitoring", "method": "Transfer"},
 		})
 	})
 
@@ -111,11 +109,60 @@ func main() {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		json.NewEncoder(w).Encode(map[string]any{
 			"predictions": []map[string]any{
-				{"patient": "P-1044 Musa Ibrahim", "risk": "High", "condition": "Sepsis Risk", "confidence": 87},
-				{"patient": "P-1042 Adebayo Johnson", "risk": "Medium", "condition": "Readmission Likely", "confidence": 64},
-				{"patient": "P-1043 Chioma Okoro", "risk": "Low", "condition": "Stable", "confidence": 92},
+				{"patient": "P-1044 Musa Ibrahim", "risk": "High", "condition": "Sepsis Risk", "confidence": 87, "action": "Immediate blood culture + antibiotics", "vitals": "BP 90/60, HR 115"},
+				{"patient": "P-1042 Adebayo Johnson", "risk": "Medium", "condition": "Readmission Likely", "confidence": 64, "action": "Schedule follow-up in 7 days", "vitals": "Stable but low SpO2"},
+				{"patient": "P-1043 Chioma Okoro", "risk": "Low", "condition": "Stable - Ready for Discharge", "confidence": 92, "action": "Discharge tomorrow", "vitals": "All normal"},
 			},
 			"bedOccupancy": 84, "revenueForecast": 28400000, "aiStatus": "Active",
+		})
+	})
+
+	// NEW ENTERPRISE MODULES
+	mux.HandleFunc("/api/beds", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"id": "B-ICU-01", "ward": "ICU-2", "status": "Occupied", "patient": "P-1042 Adebayo", "type": "ICU Ventilator"},
+			{"id": "B-ICU-02", "ward": "ICU-2", "status": "Available", "patient": "", "type": "ICU Ventilator"},
+			{"id": "B-W4-01", "ward": "W-4", "status": "Occupied", "patient": "P-1043 Chioma", "type": "General"},
+			{"id": "B-W4-02", "ward": "W-4", "status": "Available", "patient": "", "type": "General"},
+			{"id": "B-ER-01", "ward": "ER-1", "status": "Occupied", "patient": "P-1044 Musa", "type": "Emergency"},
+			{"id": "B-ER-02", "ward": "ER-1", "status": "Cleaning", "patient": "", "type": "Emergency"},
+			{"id": "B-W2-01", "ward": "W-2", "status": "Occupied", "patient": "P-1045 Grace", "type": "General"},
+			{"id": "B-W2-02", "ward": "W-2", "status": "Available", "patient": "", "type": "General"},
+		})
+	})
+
+	mux.HandleFunc("/api/ambulance", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"id": "AMB-01", "status": "Available", "location": "Lagos Main", "eta": "5 min", "driver": "John O.", "plate": "LND-234AB"},
+			{"id": "AMB-02", "status": "On Mission", "location": "Ikeja - En route", "eta": "12 min", "driver": "Emeka K.", "plate": "LND-511XY"},
+			{"id": "AMB-03", "status": "Available", "location": "VI", "eta": "3 min", "driver": "Aisha T.", "plate": "LND-902CD"},
+		})
+	})
+
+	mux.HandleFunc("/api/equipment", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"id": "EQ-VEN-01", "name": "Ventilator Philips V60", "ward": "ICU-2", "status": "In Use", "lastService": "2026-10-20", "nextService": "2026-12-20"},
+			{"id": "EQ-MON-02", "name": "Patient Monitor Mindray", "ward": "W-4", "status": "Available", "lastService": "2026-11-01", "nextService": "2026-12-01"},
+			{"id": "EQ-XRAY-01", "name": "Mobile X-Ray GE", "ward": "ER-1", "status": "Maintenance", "lastService": "2026-10-28", "nextService": "2026-11-05"},
+			{"id": "EQ-DEF-01", "name": "Defibrillator Zoll", "ward": "ER-1", "status": "Available", "lastService": "2026-11-02", "nextService": "2026-12-02"},
+			{"id": "EQ-INF-05", "name": "Infusion Pump", "ward": "ICU-2", "status": "Available", "lastService": "2026-11-02", "nextService": "2026-12-02"},
+		})
+	})
+
+	mux.HandleFunc("/api/labs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"id": "LAB-1001", "patient": "P-1042 Adebayo", "test": "Blood Culture", "status": "Completed", "result": "Negative - No growth", "doctor": "Dr. Brownson"},
+			{"id": "LAB-1002", "patient": "P-1044 Musa", "test": "CT Scan Chest", "status": "Pending", "result": "In Progress - Radiology", "doctor": "Dr. Aisha"},
+			{"id": "LAB-1003", "patient": "P-1043 Chioma", "test": "CBC + Electrolytes", "status": "Completed", "result": "Normal WBC 7.2, Hb 12.4", "doctor": "Dr. Emeka"},
+			{"id": "LAB-1004", "patient": "P-1045 Grace", "test": "Malaria Parasite", "status": "Completed", "result": "Positive - Treatment started", "doctor": "Dr. Brownson"},
 		})
 	})
 
@@ -130,7 +177,7 @@ func main() {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		var count int
 		if db != nil { db.QueryRow("SELECT COUNT(*) FROM patients").Scan(&count) } else { count = 4 }
-		json.NewEncoder(w).Encode(map[string]any{"totalPatients": count, "bedOccupancy": 84, "revenue": 28400000, "staffOnDuty": 12})
+		json.NewEncoder(w).Encode(map[string]any{"totalPatients": count, "bedOccupancy": 75, "availableBeds": 3, "revenue": 1690000, "staffOnDuty": 3, "availableAmbulance": 2})
 	})
 
 	mux.HandleFunc("/api/patients/action", func(w http.ResponseWriter, r *http.Request) {
@@ -165,6 +212,6 @@ func main() {
 	handler := cors.AllowAll().Handler(mux)
 	port := os.Getenv("PORT")
 	if port == "" { port = "8080" }
-	log.Println("Go API on :" + port)
+	log.Println("Go API on :" + port + " - Enterprise modules LIVE")
 	log.Fatal(http.ListenAndServe(":"+port, handler))
 }
