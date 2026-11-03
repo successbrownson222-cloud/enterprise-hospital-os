@@ -261,12 +261,46 @@ func main() {
 		}
 	})
 
-	mux.HandleFunc("/api/staff", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("/api/staff", func(w http.ResponseWriter, r *http.Request) {
 		setCORS(w)
+		if r.Method == "OPTIONS" { w.WriteHeader(200); return }
+		if r.Method == "POST" {
+			// Allow adding staff via this endpoint too
+			var req struct{ Name, Role, Specialty, Status string }
+			json.NewDecoder(r.Body).Decode(&req)
+			if db != nil {
+				id := "S-" + time.Now().Format("150405")
+				db.Exec("INSERT INTO staff (id,name,role,specialty,status) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO NOTHING", id, req.Name, req.Role, req.Specialty, req.Status)
+			}
+			json.NewEncoder(w).Encode(map[string]string{"status":"added"})
+			return
+		}
+		if db != nil {
+			rows, err := db.Query("SELECT id,name,role,specialty,status FROM staff ORDER BY created_at DESC")
+			if err == nil && rows != nil {
+				defer rows.Close()
+				list := []map[string]string{}
+				for rows.Next() {
+					var id,name,role,spec,status string
+					rows.Scan(&id,&name,&role,&spec,&status)
+					list = append(list, map[string]string{"id":id,"name":name,"role":role,"specialty":spec,"status":status})
+				}
+				// Also include users who are staff
+				rows2, _ := db.Query("SELECT id,email,name,user_type FROM users WHERE user_type IN ('doctor','nurse','admin')")
+				if rows2 != nil {
+					defer rows2.Close()
+					for rows2.Next() {
+						var id,email,name,ut string
+						rows2.Scan(&id,&email,&name,&ut)
+						list = append(list, map[string]string{"id":id,"name":name+" ("+email+")","role":ut,"specialty":"User","status":"On Duty"})
+					}
+				}
+				if len(list)>0 { json.NewEncoder(w).Encode(list); return }
+			}
+		}
 		json.NewEncoder(w).Encode([]map[string]string{
-			{"id": "S-1", "name": "Dr. Success Brownson", "role": "Doctor", "specialty": "ICU", "status": "On Duty"},
-			{"id": "S-2", "name": "Dr. Aisha Bello", "role": "Nurse", "specialty": "ER", "status": "On Duty"},
-			{"id": "S-3", "name": "Dr. Emeka", "role": "Doctor", "specialty": "General", "status": "Off Duty"},
+			{"id": "S-1", "name": "Dr. Success Brownson (brownsonsuccess033@gmail.com)", "role": "admin", "specialty": "ICU", "status": "On Duty"},
+			{"id": "S-2", "name": "Dr. Aisha Bello", "role": "nurse", "specialty": "ER", "status": "On Duty"},
 		})
 	})
 
