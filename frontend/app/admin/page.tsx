@@ -73,20 +73,18 @@ export default function AdminDashboard() {
     if(res.ok){ alert("Admin created! Login"); setAuthMode("login"); } else { const d=await res.json(); alert(d.error||"Failed"); }
   };
 
-  // FIXED: Staff now reflects instantly
   const addStaff = async () => {
     if(!newStaff.email || !newStaff.password || !newStaff.name) return alert("Name, Email, Password required");
     const res = await fetch(`${API_URL}/api/auth/register`, {method:"POST", headers:hdr(), body:JSON.stringify(newStaff)});
     const d = await res.json();
     if(res.ok){
-      // INSTANT UI UPDATE - THIS WAS MISSING
       const newEntry = {id:d.id||`S-${Date.now()}`, name:`${newStaff.name} (${newStaff.email})`, role:newStaff.user_type, specialty:newStaff.specialty, status:"On Duty"};
       setStaff(prev=>[newEntry, ...prev]);
       setShowStaff(false);
       setNewStaff({email:"", password:"", name:"", user_type:"doctor", specialty:"ICU", role:"Doctor"});
-      alert(`✅ Staff ${newStaff.name} added! Visible now in staff list`);
-      fetchAll(); // re-sync with DB
-    } else alert(d.error||"Failed - admin token needed");
+      alert(`✅ Staff ${newStaff.name} added!`);
+      fetchAll();
+    } else alert(d.error||"Failed");
   };
 
   const addPatient = async () => {
@@ -94,7 +92,7 @@ export default function AdminDashboard() {
     const res = await fetch(`${API_URL}/api/patients`, {method:"POST", headers:hdr(), body:JSON.stringify({...newPatient, status:"Admitted"})});
     if(res.ok){ const d=await res.json(); setPatients(prev=>[d,...prev]); setShowPatient(false); alert("Patient Admitted "+d.id); } else alert("Failed");
   };
-  const addAmbulance = async () => { const item={...newAmbulance, id:newAmbulance.id||`AMB-${Date.now().toString().slice(-3)}`, eta:"5 min"}; setAmbulance(prev=>[item,...prev]); setShowAmbulance(false); alert("Ambulance "+item.id+" added"); };
+  const addAmbulance = async () => { const item={...newAmbulance, id:newAmbulance.id||`AMB-${Date.now().toString().slice(-3)}`, eta:"5 min", status:"Available"}; setAmbulance(prev=>[item,...prev]); setShowAmbulance(false); alert("Ambulance "+item.id+" added"); };
   const addEquipment = async () => { const item={...newEquipment, id:newEquipment.id||`EQ-${Date.now().toString().slice(-3)}`}; setEquipment(prev=>[item,...prev]); setShowEquipment(false); alert("Equipment added"); };
   const addBed = async () => { const item={...newBed, id:newBed.id||`B-${Date.now().toString().slice(-3)}`, patient:""}; setBeds(prev=>[item,...prev]); setShowBed(false); alert("Bed added"); };
   const addLab = async () => { const item={id:`LAB-${Date.now().toString().slice(-3)}`, patient:newLab.patient, test:newLab.test, doctor:newLab.doctor, status:"Pending"}; setLabs(prev=>[item,...prev]); setShowLab(false); alert("Lab ordered"); };
@@ -162,7 +160,7 @@ export default function AdminDashboard() {
               <div style={{display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"10px"}}>
                 <div style={{background:"white", borderRadius:"14px", padding:"14px", border:"1px solid #e5e7eb"}}><div style={{fontSize:"10px", color:"#6b7280"}}>REVENUE</div><div style={{fontSize:"20px", fontWeight:800}}>₦{(billing.reduce((s,b)=>s+b.amount,0)/1000000).toFixed(1)}M</div></div>
                 <div style={{background:"white", borderRadius:"14px", padding:"14px", border:"1px solid #e5e7eb"}}><div style={{fontSize:"10px", color:"#6b7280"}}>PATIENTS</div><div style={{fontSize:"20px", fontWeight:800}}>{patients.length}</div></div>
-                <div style={{background:"white", borderRadius:"14px", padding:"14px", border:"1px solid #e5e7eb"}}><div style={{fontSize:"10px", color:"#6b7280"}}>STAFF</div><div style={{fontSize:"20px", fontWeight:800}}>{staff.length}</div><div style={{fontSize:"11px", color:"#10b981"}}>{staff.filter(s=>s.status==="On Duty").length} on duty</div></div>
+                <div style={{background:"white", borderRadius:"14px", padding:"14px", border:"1px solid #e5e7eb"}}><div style={{fontSize:"10px", color:"#6b7280"}}>STAFF</div><div style={{fontSize:"20px", fontWeight:800}}>{staff.length}</div></div>
                 <div style={{background:"white", borderRadius:"14px", padding:"14px", border:"1px solid #e5e7eb"}}><div style={{fontSize:"10px", color:"#6b7280"}}>BEDS FREE</div><div style={{fontSize:"20px", fontWeight:800}}>{beds.filter(b=>b.status==="Available").length}/{beds.length||0}</div></div>
               </div>
             </>
@@ -170,8 +168,8 @@ export default function AdminDashboard() {
 
           {tab==="staff" && (
             <div style={{background:"white", borderRadius:"16px", padding:"14px", border:"1px solid #e5e7eb"}}>
-              <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px"}}><h3 style={{margin:0, fontSize:"16px"}}>Staff ({staff.length})</h3><button onClick={()=>setShowStaff(true)} style={{padding:"10px 14px", background:"#111827", color:"white", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"12px"}}>+ Add Staff</button></div>
-              <div style={{marginTop:"12px"}}>{staff.map(s=><div key={s.id} style={{display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 0", borderBottom:"1px solid #f3f4f6", gap:"10px"}}><div style={{flex:1, minWidth:0}}><div style={{fontWeight:600, fontSize:"14px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{s.name}</div><div style={{fontSize:"11px", color:"#6b7280"}}>{s.role} • {s.specialty}</div></div><span style={{fontSize:"10px", padding:"4px 8px", borderRadius:"20px", background:s.status==="On Duty"?"#dcfce7":"#fee2e2", whiteSpace:"nowrap"}}>{s.status}</span></div>)}{staff.length===0 && <div style={{padding:"20px", textAlign:"center", color:"#6b7280", fontSize:"13px"}}>No staff yet — click + Add Staff to create first doctor/nurse<br/>After adding, it will appear here instantly ✅</div>}</div>
+              <div style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}><h3 style={{margin:0, fontSize:"16px"}}>Staff ({staff.length})</h3><button onClick={()=>setShowStaff(true)} style={{padding:"10px 14px", background:"#111827", color:"white", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"12px"}}>+ Add Staff</button></div>
+              <div style={{marginTop:"12px"}}>{staff.map(s=><div key={s.id} style={{display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 0", borderBottom:"1px solid #f3f4f6", gap:"10px"}}><div style={{flex:1, minWidth:0}}><div style={{fontWeight:600, fontSize:"14px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{s.name}</div><div style={{fontSize:"11px", color:"#6b7280"}}>{s.role} • {s.specialty}</div></div><span style={{fontSize:"10px", padding:"4px 8px", borderRadius:"20px", background:s.status==="On Duty"?"#dcfce7":"#fee2e2", whiteSpace:"nowrap"}}>{s.status}</span></div>)}</div>
             </div>
           )}
 
@@ -183,10 +181,40 @@ export default function AdminDashboard() {
           )}
 
           {tab==="beds" && <div style={{background:"white", borderRadius:"16px", padding:"14px", border:"1px solid #e5e7eb"}}><div style={{display:"flex", justifyContent:"space-between"}}><h3 style={{margin:0}}>Beds ({beds.length})</h3><button onClick={()=>setShowBed(true)} style={{padding:"10px 14px", background:"#111827", color:"white", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"12px"}}>+ Add Bed</button></div><div style={{display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"10px", marginTop:"12px"}}>{beds.map(b=><div key={b.id} style={{padding:"12px", borderRadius:"12px", border:"1px solid #e5e7eb", borderLeft:`4px solid ${b.status==="Available"?"#10b981":"#ef4444"}`}}><b style={{fontSize:"13px"}}>{b.id}</b><div style={{fontSize:"11px", color:"#6b7280"}}>{b.ward}</div><div style={{fontSize:"10px", marginTop:"4px", padding:"3px 6px", borderRadius:"10px", background:b.status==="Available"?"#dcfce7":"#fee2e2", display:"inline-block"}}>{b.status}</div></div>)}</div></div>}
+
           {tab==="ambulance" && <div style={{background:"white", borderRadius:"16px", padding:"14px", border:"1px solid #e5e7eb"}}><div style={{display:"flex", justifyContent:"space-between"}}><h3 style={{margin:0}}>Ambulance ({ambulance.length})</h3><button onClick={()=>setShowAmbulance(true)} style={{padding:"10px 14px", background:"#111827", color:"white", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"12px"}}>+ Add</button></div><div style={{marginTop:"12px"}}>{ambulance.map(a=><div key={a.id} style={{display:"flex", justifyContent:"space-between", padding:"12px 0", borderBottom:"1px solid #f3f4f6"}}><div><b>{a.id}</b><div style={{fontSize:"11px", color:"#6b7280"}}>{a.location} • {a.driver}</div></div><span style={{fontSize:"10px", padding:"4px 8px", borderRadius:"10px", background:a.status==="Available"?"#dcfce7":"#fef3c7"}}>{a.status}</span></div>)}</div></div>}
-          {tab==="equipment" && <div style={{background:"white", borderRadius:"16px", padding:"14px", border:"1px solid #e5e7eb"}}><div style={{display:"flex", justifyContent:"space-between"}}><h3 style={{margin:0}}>Equipment ({equipment.length})</h3><button onClick={()=>setShowEquipment(true)} style={{padding:"10px 14px", background:"#111827", color:"white", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"12px"}}>+ Add</button></div><div style={{marginTop:"12px"}}>{equipment.map(e=><div key={e.id} style={{display:"flex", justifyContent:"space-between", padding:"12px 0", borderBottom:"1px solid #f3f4f6"}}><div><b>{e.name||e.id}</b><div style={{fontSize:"11px", color:"#6b7280"}}>{e.ward}</div></div><span style={{fontSize:"10px", padding:"4px 8px", borderRadius:"16px", padding:"14px", border:"1px solid #e5e7eb"}}><h3>Billing</h3>{billing.map(b=><div key={b.id} style={{display:"flex", justifyContent:"space-between", padding:"12px 0", borderBottom:"1px solid #f3f4f6"}}><div><b>{b.id}</b> - {b.patient}</div><b>₦{b.amount?.toLocaleString()}</b></div>)}</div>}
+
+          {tab==="equipment" && <div style={{background:"white", borderRadius:"16px", padding:"14px", border:"1px solid #e5e7eb"}}><div style={{display:"flex", justifyContent:"space-between"}}><h3 style={{margin:0}}>Equipment ({equipment.length})</h3><button onClick={()=>setShowEquipment(true)} style={{padding:"10px 14px", background:"#111827", color:"white", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"12px"}}>+ Add</button></div><div style={{marginTop:"12px"}}>{equipment.map(e=><div key={e.id} style={{display:"flex", justifyContent:"space-between", padding:"12px 0", borderBottom:"1px solid #f3f4f6"}}><div><b>{e.name||e.id}</b><div style={{fontSize:"11px", color:"#6b7280"}}>{e.ward}</div></div><span style={{fontSize:"10px", padding:"4px 8px", borderRadius:"20px", background:e.status==="Available"?"#dcfce7":"#fef3c7"}}>{e.status}</span></div>)}</div></div>}
+
+          {tab==="labs" && <div style={{background:"white", borderRadius:"16px", padding:"14px", border:"1px solid #e5e7eb"}}><div style={{display:"flex", justifyContent:"space-between"}}><h3 style={{margin:0}}>Labs ({labs.length})</h3><button onClick={()=>setShowLab(true)} style={{padding:"10px 14px", background:"#111827", color:"white", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"12px"}}>+ Order</button>
+              </div>
+              <div style={{marginTop:"12px"}}>
+                {labs.map(l=>(
+                  <div key={l.id} style={{padding:"12px 0", borderBottom:"1px solid #f3f4f6"}}>
+                    <b>{l.id} - {l.test}</b>
+                    <div style={{fontSize:"11px", color:"#6b7280"}}>{l.patient}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {tab==="finance" && (
+            <div style={{background:"white", borderRadius:"16px", padding:"14px", border:"1px solid #e5e7eb"}}>
+              <h3 style={{margin:0}}>Billing</h3>
+              <div style={{marginTop:"12px"}}>
+                {billing.map(b=>(
+                  <div key={b.id} style={{display:"flex", justifyContent:"space-between", padding:"12px 0", borderBottom:"1px solid #f3f4f6"}}>
+                    <div><b>{b.id}</b> - {b.patient}</div>
+                    <b>₦{b.amount?.toLocaleString()}</b>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </main>
       </div>
+
       {showStaff && (
         <div style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"grid", placeItems:"center", zIndex:50, padding:"16px"}}>
           <div style={{background:"white", borderRadius:"20px", padding:"20px", width:"100%", maxWidth:"360px"}}>
@@ -202,20 +230,68 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
+
       {showPatient && (
         <div style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"grid", placeItems:"center", zIndex:50, padding:"16px"}}>
           <div style={{background:"white", borderRadius:"20px", padding:"20px", width:"100%", maxWidth:"360px"}}>
             <div style={{display:"flex", justifyContent:"space-between"}}><h3 style={{margin:0}}>Add Patient</h3><button onClick={()=>setShowPatient(false)} style={{border:"none", background:"#f3f4f6", width:"32px", height:"32px", borderRadius:"10px"}}>✕</button></div>
             <input value={newPatient.name} onChange={e=>setNewPatient({...newPatient, name:e.target.value})} placeholder="Full Name" style={{width:"100%", padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb", marginTop:"12px", boxSizing:"border-box"}}/>
-            <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px", marginTop:"10px"}}><input value={newPatient.age} type="number" onChange={e=>setNewPatient({...newPatient, age:parseInt(e.target.value)})} placeholder="Age" style={{padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb"}}/><select value={newPatient.ward} onChange={e=>setNewPatient({...newPatient, ward:e.target.value})} style={{padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb"}}><option>ICU-2</option><option>W-4</option><option>ER-1</option></select></div>
-            <button onClick={addPatient} style={{marginTop:"14px", width:"100%", padding:"14px", background:"#111827", color:"white", border:"none", borderRadius:"12px", fontWeight:700}}>Admit</button>
+            <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px", marginTop:"10px"}}>
+              <input value={newPatient.age} type="number" onChange={e=>setNewPatient({...newPatient, age:parseInt(e.target.value)})} placeholder="Age" style={{padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb"}}/>
+              <select value={newPatient.ward} onChange={e=>setNewPatient({...newPatient, ward:e.target.value})} style={{padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb"}}><option>ICU-2</option><option>W-4</option><option>ER-1</option></select>
+            </div>
+            <button onClick={addPatient} style={{marginTop:"14px", width:"100%", padding:"14px", background:"#111827", color:"white", border:"none", borderRadius:"12px", fontWeight:700}}>Admit Patient</button>
           </div>
         </div>
       )}
-      {showAmbulance && <div style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"grid", placeItems:"center", zIndex:50, padding:"16px"}}><div style={{background:"white", borderRadius:"20px", padding:"20px", width:"100%", maxWidth:"360px"}}><div style={{display:"flex", justifyContent:"space-between"}}><h3 style={{margin:0}}>Add Ambulance</h3><button onClick={()=>setShowAmbulance(false)} style={{border:"none", background:"#f3f4f6", width:"32px", height:"32px", borderRadius:"10px"}}>✕</button></div><input value={newAmbulance.location} onChange={e=>setNewAmbulance({...newAmbulance, location:e.target.value})} placeholder="Location" style={{width:"100%", padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb", marginTop:"12px", boxSizing:"border-box"}}/><div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px", marginTop:"10px"}}><input value={newAmbulance.driver} onChange={e=>setNewAmbulance({...newAmbulance, driver:e.target.value})} placeholder="Driver" style={{padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb"}}/><input value={newAmbulance.plate} onChange={e=>setNewAmbulance({...newAmbulance, plate:e.target.value})} placeholder="Plate" style={{padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb"}}/></div><button onClick={addAmbulance} style={{marginTop:"14px", width:"100%", padding:"14px", background:"#111827", color:"white", border:"none", borderRadius:"12px", fontWeight:700}}>Add Ambulance</button></div></div>}
-      {showEquipment && <div style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"grid", placeItems:"center", zIndex:50, padding:"16px"}}><div style={{background:"white", borderRadius:"20px", padding:"20px", width:"100%", maxWidth:"360px"}}><div style={{display:"flex", justifyContent:"space-between"}}><h3 style={{margin:0}}>Add Equipment</h3><button onClick={()=>setShowEquipment(false)} style={{border:"none", background:"#f3f4f6", width:"32px", height:"32px", borderRadius:"10px"}}>✕</button></div><input value={newEquipment.name} onChange={e=>setNewEquipment({...newEquipment, name:e.target.value})} placeholder="Ventilator" style={{width:"100%", padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb", marginTop:"12px", boxSizing:"border-box"}}/><button onClick={addEquipment} style={{marginTop:"14px", width:"100%", padding:"14px", background:"#111827", color:"white", border:"none", borderRadius:"12px", fontWeight:700}}>Add Equipment</button></div></div>}
-      {showBed && <div style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"grid", placeItems:"center", zIndex:50, padding:"16px"}}><div style={{background:"white", borderRadius:"20px", padding:"20px", width:"100%", maxWidth:"360px"}}><div style={{display:"flex", justifyContent:"space-between"}}><h3 style={{margin:0}}>Add Bed</h3><button onClick={()=>setShowBed(false)} style={{border:"none", background:"#f3f4f6", width:"32px", height:"32px", borderRadius:"10px"}}>✕</button></div><div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px", marginTop:"12px"}}><select value={newBed.ward} onChange={e=>setNewBed({...newBed, ward:e.target.value})} style={{padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb"}}><option>ICU-2</option><option>W-4</option><option>ER-1</option></select><select value={newBed.type} onChange={e=>setNewBed({...newBed, type:e.target.value})} style={{padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb"}}><option>ICU Ventilator</option><option>General</option></select></div><button onClick={addBed} style={{marginTop:"14px", width:"100%", padding:"14px", background:"#111827", color:"white", border:"none", borderRadius:"12px", fontWeight:700}}>Add Bed</button></div></div>}
-      {showLab && <div style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"grid", placeItems:"center", zIndex:50, padding:"16px"}}><div style={{background:"white", borderRadius:"20px", padding:"20px", width:"100%", maxWidth:"360px"}}><div style={{display:"flex", justifyContent:"space-between"}}><h3 style={{margin:0}}>Order Lab</h3><button onClick={()=>setShowLab(false)} style={{border:"none", background:"#f3f4f6", width:"32px", height:"32px", borderRadius:"10px"}}>✕</button></div><input value={newLab.patient} onChange={e=>setNewLab({...newLab, patient:e.target.value})} placeholder="Patient ID" style={{width:"100%", padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb", marginTop:"12px", boxSizing:"border-box"}}/><select value={newLab.test} onChange={e=>setNewLab({...newLab, test:e.target.value})} style={{width:"100%", padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb", marginTop:"10px"}}><option>Blood Culture</option><option>CT Scan</option><option>CBC</option></select><button onClick={addLab} style={{marginTop:"14px", width:"100%", padding:"14px", background:"#111827", color:"white", border:"none", borderRadius:"12px", fontWeight:700}}>Order Lab</button></div></div>}
+
+      {showAmbulance && (
+        <div style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"grid", placeItems:"center", zIndex:50, padding:"16px"}}>
+          <div style={{background:"white", borderRadius:"20px", padding:"20px", width:"100%", maxWidth:"360px"}}>
+            <div style={{display:"flex", justifyContent:"space-between"}}><h3 style={{margin:0}}>Add Ambulance</h3><button onClick={()=>setShowAmbulance(false)} style={{border:"none", background:"#f3f4f6", width:"32px", height:"32px", borderRadius:"10px"}}>✕</button></div>
+            <input value={newAmbulance.location} onChange={e=>setNewAmbulance({...newAmbulance, location:e.target.value})} placeholder="Location" style={{width:"100%", padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb", marginTop:"12px", boxSizing:"border-box"}}/>
+            <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px", marginTop:"10px"}}>
+              <input value={newAmbulance.driver} onChange={e=>setNewAmbulance({...newAmbulance, driver:e.target.value})} placeholder="Driver" style={{padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb"}}/>
+              <input value={newAmbulance.plate} onChange={e=>setNewAmbulance({...newAmbulance, plate:e.target.value})} placeholder="Plate" style={{padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb"}}/>
+            </div>
+            <button onClick={addAmbulance} style={{marginTop:"14px", width:"100%", padding:"14px", background:"#111827", color:"white", border:"none", borderRadius:"12px", fontWeight:700}}>Add Ambulance</button>
+          </div>
+        </div>
+      )}
+
+      {showEquipment && (
+        <div style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"grid", placeItems:"center", zIndex:50, padding:"16px"}}>
+          <div style={{background:"white", borderRadius:"20px", padding:"20px", width:"100%", maxWidth:"360px"}}>
+            <div style={{display:"flex", justifyContent:"space-between"}}><h3 style={{margin:0}}>Add Equipment</h3><button onClick={()=>setShowEquipment(false)} style={{border:"none", background:"#f3f4f6", width:"32px", height:"32px", borderRadius:"10px"}}>✕</button></div>
+            <input value={newEquipment.name} onChange={e=>setNewEquipment({...newEquipment, name:e.target.value})} placeholder="Ventilator" style={{width:"100%", padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb", marginTop:"12px", boxSizing:"border-box"}}/>
+            <button onClick={addEquipment} style={{marginTop:"14px", width:"100%", padding:"14px", background:"#111827", color:"white", border:"none", borderRadius:"12px", fontWeight:700}}>Add Equipment</button>
+          </div>
+        </div>
+      )}
+
+      {showBed && (
+        <div style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"grid", placeItems:"center", zIndex:50, padding:"16px"}}>
+          <div style={{background:"white", borderRadius:"20px", padding:"20px", width:"100%", maxWidth:"360px"}}>
+            <div style={{display:"flex", justifyContent:"space-between"}}><h3 style={{margin:0}}>Add Bed</h3><button onClick={()=>setShowBed(false)} style={{border:"none", background:"#f3f4f6", width:"32px", height:"32px", borderRadius:"10px"}}>✕</button></div>
+            <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px", marginTop:"12px"}}>
+              <select value={newBed.ward} onChange={e=>setNewBed({...newBed, ward:e.target.value})} style={{padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb"}}><option>ICU-2</option><option>W-4</option><option>ER-1</option></select>
+              <select value={newBed.type} onChange={e=>setNewBed({...newBed, type:e.target.value})} style={{padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb"}}><option>ICU Ventilator</option><option>General</option></select>
+            </div>
+            <button onClick={addBed} style={{marginTop:"14px", width:"100%", padding:"14px", background:"#111827", color:"white", border:"none", borderRadius:"12px", fontWeight:700}}>Add Bed</button>
+          </div>
+        </div>
+      )}
+
+      {showLab && (
+        <div style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"grid", placeItems:"center", zIndex:50, padding:"16px"}}>
+          <div style={{background:"white", borderRadius:"20px", padding:"20px", width:"100%", maxWidth:"360px"}}>
+            <div style={{display:"flex", justifyContent:"space-between"}}><h3 style={{margin:0}}>Order Lab</h3><button onClick={()=>setShowLab(false)} style={{border:"none", background:"#f3f4f6", width:"32px", height:"32px", borderRadius:"10px"}}>✕</button></div>
+            <input value={newLab.patient} onChange={e=>setNewLab({...newLab, patient:e.target.value})} placeholder="Patient ID" style={{width:"100%", padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb", marginTop:"12px", boxSizing:"border-box"}}/>
+            <select value={newLab.test} onChange={e=>setNewLab({...newLab, test:e.target.value})} style={{width:"100%", padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb", marginTop:"10px"}}><option>Blood Culture</option><option>CT Scan</option><option>CBC</option></select>
+            <button onClick={addLab} style={{marginTop:"14px", width:"100%", padding:"14px", background:"#111827", color:"white", border:"none", borderRadius:"12px", fontWeight:700}}>Order Lab</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
