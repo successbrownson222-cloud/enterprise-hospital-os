@@ -117,4 +117,4 @@ export default function AdminUI(props:any){
       {showLab && <div style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"grid", placeItems:"center", zIndex:50, padding:"16px"}}><div style={{background:"white", borderRadius:"20px", padding:"20px", width:"100%", maxWidth:"360px"}}><h3>Order Lab</h3><input value={newLab.patient} onChange={(e:any)=>setNewLab({...newLab, patient:e.target.value})} placeholder="Patient ID" style={{width:"100%", padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb", marginTop:"10px", boxSizing:"border-box"}}/><button onClick={addLab} style={{marginTop:"14px", width:"100%", padding:"14px", background:"#111827", color:"white", border:"none", borderRadius:"12px", fontWeight:700}}>Order Lab</button><button onClick={()=>setShowLab(false)} style={{marginTop:"8px", width:"100%", padding:"10px", background:"#f3f4f6", border:"none", borderRadius:"10px"}}>Cancel</button></div></div>}
     </div>
   );
-}
+} 
