@@ -14,42 +14,62 @@ export default function AdminDashboard() {
   const [newStaff, setNewStaff] = useState({email:"", password:"", name:"", user_type:"doctor"});
   const [loading, setLoading] = useState(true);
   const [userType, setUserType] = useState("");
+  const [email, setEmail] = useState("");
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [authMode, setAuthMode] = useState<"login"|"signup">("login");
+  const [authForm, setAuthForm] = useState({email:"brownsonsuccess033@gmail.com", password:"", name:"Success Brownson"});
 
   useEffect(() => {
-    const ut = localStorage.getItem("user_type") || "";
+    const t = localStorage.getItem("token");
+    const ut = localStorage.getItem("user_type")||"";
+    const em = localStorage.getItem("email")||"";
     setUserType(ut);
-    if(ut !== "admin"){ 
-      alert("Admin only! Login as admin@hospital.com / Admin123!"); 
-      window.location.href="/login"; 
-      return; 
-    }
-    const fetchAll = async () => {
-      try {
-        const [p, s, b, a] = await Promise.all([
-          fetch(`${API_URL}/api/patients`, {cache:'no-store'}).then(r=>r.json()),
-          fetch(`${API_URL}/api/staff`, {cache:'no-store'}).then(r=>r.json()),
-          fetch(`${API_URL}/api/billing`, {cache:'no-store'}).then(r=>r.json()),
-          fetch(`${API_URL}/api/analytics`, {cache:'no-store'}).then(r=>r.json()).catch(()=>null),
-        ]);
-        setPatients(p.patients||p.data||p||[]);
-        if(Array.isArray(s)) setStaff(s);
-        if(Array.isArray(b)) setBilling(b);
-        if(a) setAnalytics(a);
-      } catch {}
-      setLoading(false);
-    };
-    fetchAll();
+    setEmail(em);
+    if(t && ut==="admin"){ setLoggedIn(true); fetchAll(); }
+    else setLoading(false);
   }, []);
 
-  const token = () => {
-    if(typeof window !== "undefined") return localStorage.getItem("token") || "";
-    return "";
+  const fetchAll = async () => {
+    try {
+      const [p,s,b,a] = await Promise.all([
+        fetch(`${API_URL}/api/patients`, {cache:'no-store'}).then(r=>r.json()),
+        fetch(`${API_URL}/api/staff`, {cache:'no-store'}).then(r=>r.json()),
+        fetch(`${API_URL}/api/billing`, {cache:'no-store'}).then(r=>r.json()),
+        fetch(`${API_URL}/api/analytics`, {cache:'no-store'}).then(r=>r.json()).catch(()=>null),
+      ]);
+      setPatients(p.patients||p.data||p||[]);
+      if(Array.isArray(s)) setStaff(s);
+      if(Array.isArray(b)) setBilling(b);
+      if(a) setAnalytics(a);
+    } catch {}
+    setLoading(false);
+  };
+
+  const token = () => typeof window!=="undefined"?localStorage.getItem("token")||"":"";
+
+  const handleLogin = async () => {
+    const res = await fetch(`${API_URL}/api/auth/login`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({email:authForm.email, password:authForm.password})});
+    const data = await res.json();
+    if(res.ok){
+      if(data.user_type!=="admin"){ alert("Not admin! Use brownsonsuccess033@gmail.com"); return; }
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("user_type", data.user_type);
+      localStorage.setItem("email", authForm.email);
+      setLoggedIn(true); setUserType(data.user_type); setEmail(authForm.email); fetchAll();
+    } else alert(data.error||"Login failed - run /api/seed first");
+  };
+
+  const handleSignup = async () => {
+    const res = await fetch(`${API_URL}/api/auth/register`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({email:authForm.email, password:authForm.password, name:authForm.name, user_type:"admin"})});
+    const data = await res.json();
+    if(res.ok){ alert("Admin created! Login now"); setAuthMode("login"); }
+    else alert(data.error||"Signup failed - run /api/seed or login as admin first");
   };
 
   const admitPatient = async () => {
     if(!newPatient.name) return alert("Enter name");
     const res = await fetch(`${API_URL}/api/patients`, {method:"POST", headers:{"Content-Type":"application/json","Authorization":`Bearer ${token()}`}, body:JSON.stringify({...newPatient, status:"Admitted"})});
-    if(res.ok){ const data = await res.json(); setPatients(prev=>[data, ...prev]); setNewPatient({name:"", age:30, ward:"ICU-2", doctor:"Dr. Success Brownson"}); alert("Admitted "+data.id); }
+    if(res.ok){ const d=await res.json(); setPatients(prev=>[d,...prev]); alert("Admitted "+d.id); }
     else alert("Failed - admin token needed");
   };
 
@@ -57,54 +77,72 @@ export default function AdminDashboard() {
     await fetch(`${API_URL}/api/patients/action`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({id, action:"discharge"})});
     setPatients(prev=>prev.map(p=>p.id===id?{...p, status:"Discharged"}:p));
   };
-
   const admitExisting = async (id:string) => {
     await fetch(`${API_URL}/api/patients/action`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({id, action:"admit"})});
     setPatients(prev=>prev.map(p=>p.id===id?{...p, status:"Admitted"}:p));
   };
-
   const registerStaff = async () => {
     if(!newStaff.email || !newStaff.password) return alert("Email+Password required");
     const res = await fetch(`${API_URL}/api/auth/register`, {method:"POST", headers:{"Content-Type":"application/json","Authorization":`Bearer ${token()}`}, body:JSON.stringify(newStaff)});
     const d = await res.json();
-    if(res.ok){ alert(`Staff ${newStaff.user_type} created!`); setNewStaff({email:"", password:"", name:"", user_type:"doctor"}); }
+    if(res.ok) alert(`Staff ${newStaff.user_type} created!`);
     else alert(d.error||"Failed");
   };
 
   const stats = [
     { label: "Total Revenue", value: `₦${(billing.reduce((s,b)=>s+b.amount,0)/1000000).toFixed(1)}M`, sub: "+18% this month", color: "#10b981", bar: 80 },
     { label: "Bed Occupancy", value: `${analytics?.bedOccupancy||84}%`, sub: `${patients.length} patients`, color: "#3b82f6", bar: analytics?.bedOccupancy||84 },
-    { label: "Staff On Duty", value: `${staff.filter(s=>s.status==="On Duty").length||42}`, sub: `${staff.length} total staff`, color: "#8b5cf6", bar: 60 },
+    { label: "Staff On Duty", value: `${staff.filter(s=>s.status==="On Duty").length||42}`, sub: `${staff.length} total`, color: "#8b5cf6", bar: 60 },
     { label: "Total Patients", value: `${patients.length}`, sub: `${patients.filter(p=>p.status==="Admitted").length} admitted`, color: "#ef4444", bar: 50 },
   ];
+
+  if(!loggedIn){
+    return (
+      <div style={{minHeight:"100vh", display:"grid", placeItems:"center", background:"#f6f7fb", padding:"16px"}}>
+        <div style={{background:"white", borderRadius:"20px", padding:"24px", width:"100%", maxWidth:"380px", border:"1px solid #e5e7eb"}}>
+          <h2 style={{margin:"0 0 6px"}}>Admin Portal</h2>
+          <p style={{fontSize:"12px", color:"#6b7280", marginTop:0}}>Super Admin: brownsonsuccess033@gmail.com</p>
+          <div style={{display:"flex", gap:"8px", margin:"16px 0"}}>
+            <button onClick={()=>setAuthMode("login")} style={{flex:1, padding:"10px", borderRadius:"10px", border:"none", background:authMode==="login"?"#111827":"#f3f4f6", color:authMode==="login"?"white":"#6b7280", fontWeight:700}}>Login</button>
+            <button onClick={()=>setAuthMode("signup")} style={{flex:1, padding:"10px", borderRadius:"10px", border:"none", background:authMode==="signup"?"#111827":"#f3f4f6", color:authMode==="signup"?"white":"#6b7280", fontWeight:700}}>Sign Up</button>
+          </div>
+          <div style={{display:"grid", gap:"10px"}}>
+            {authMode==="signup" && <input value={authForm.name} onChange={e=>setAuthForm({...authForm, name:e.target.value})} placeholder="Full Name" style={{padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb"}}/>}
+            <input value={authForm.email} onChange={e=>setAuthForm({...authForm, email:e.target.value})} placeholder="brownsonsuccess033@gmail.com" style={{padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb"}}/>
+            <input value={authForm.password} type="password" onChange={e=>setAuthForm({...authForm, password:e.target.value})} placeholder="Password" style={{padding:"12px", borderRadius:"10px", border:"1px solid #e5e7eb"}}/>
+            {authMode==="login" ? <button onClick={handleLogin} style={{padding:"14px", background:"#111827", color:"white", border:"none", borderRadius:"10px", fontWeight:700}}>Login as Admin →</button> : <button onClick={handleSignup} style={{padding:"14px", background:"#111827", color:"white", border:"none", borderRadius:"10px", fontWeight:700}}>Create Admin</button>}
+          </div>
+          <div style={{marginTop:"14px", fontSize:"11px", color:"#6b7280"}}>Run /api/seed first on Go API, then login with:<br/>brownsonsuccess033@gmail.com / Success123!<br/>or admin@hospital.com / Admin123!</div>
+          <button onClick={()=>{ if(typeof window!=="undefined") window.location.href="/"; }} style={{marginTop:"12px", width:"100%", padding:"10px", background:"#f3f4f6", border:"none", borderRadius:"10px"}}>Back to Main</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: "#f6f7fb", fontFamily: "system-ui" }}>
       <style>{`@keyframes in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}.card{animation:in 0.4s ease both}@media(min-width:768px){.mobile-only{display:none!important}.desktop-only{display:flex!important}.grid-4{grid-template-columns:repeat(4,1fr)}}@media(max-width:767px){.desktop-only{display:none!important}.grid-4{grid-template-columns:repeat(2,1fr)}}`}</style>
-
       <header style={{ height: "60px", background: "white", borderBottom: "1px solid #e5e7eb", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px", position: "sticky", top: 0, zIndex: 20 }}>
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
           <button className="mobile-only" onClick={() => setMenu(!menu)} style={{ width: "40px", height: "40px", borderRadius: "10px", border: "1px solid #e5e7eb", background: "white" }}>☰</button>
           <div style={{ width: "36px", height: "36px", background: "#111827", borderRadius: "10px", display: "grid", placeItems: "center", color: "white", fontWeight: 800 }}>A</div>
-          <div><div style={{ fontWeight: 800 }}>Admin • Hospital OS</div><div style={{ fontSize: "11px", color: "#6b7280" }}>Super Admin • {userType}</div></div>
+          <div><div style={{ fontWeight: 800 }}>Admin • Hospital OS</div><div style={{ fontSize: "11px", color: "#6b7280" }}>Super Admin • {email || userType}</div></div>
         </div>
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
           <span style={{ fontSize: "11px", background: "#ecfdf5", color: "#059669", padding: "5px 10px", borderRadius: "20px", fontWeight: 700 }}>● ADMIN LIVE</span>
-          <button onClick={()=>{localStorage.clear(); window.location.href="/login"}} style={{background:"none", border:"1px solid #e5e7eb", padding:"6px 10px", borderRadius:"8px", fontSize:"12px"}}>Logout</button>
+          <button onClick={()=>{localStorage.clear(); setLoggedIn(false);}} style={{background:"none", border:"1px solid #e5e7eb", padding:"6px 10px", borderRadius:"8px", fontSize:"12px"}}>Logout</button>
         </div>
       </header>
-
       <div style={{ display: "flex" }}>
         <aside className="desktop-only" style={{ width: "220px", background: "#0b1220", color: "white", padding: "18px", flexDirection: "column", gap: "6px", position: "sticky", top: "60px", height: "calc(100vh - 60px)" }}>
           {[{ id: "overview", l: "Overview", i: "◧" },{ id: "patients", l: "Admit / Patients", i: "◎" },{ id: "staff", l: "Register Staff", i: "◐" },{ id: "finance", l: "Finance", i: "₦" }].map(n => (
             <button key={n.id} onClick={() => setTab(n.id)} style={{ textAlign: "left", padding: "12px", borderRadius: "10px", border: "none", background: tab === n.id ? "white" : "transparent", color: tab === n.id ? "#0b1220" : "#94a3b8", fontWeight: tab === n.id ? 700 : 500, cursor: "pointer" }}>{n.i} {n.l}</button>
           ))}
         </aside>
-
         <main style={{ flex: 1, padding: "16px", paddingBottom: "90px" }}>
           {tab === "overview" && (
             <>
-              <h2 style={{ margin: "0 0 14px", fontSize: "20px" }}>Welcome Admin 👋 {loading?"Loading...":""}</h2>
+              <h2 style={{ margin: "0 0 14px", fontSize: "20px" }}>Welcome Admin 👋 {loading?"Loading...":""} — {email}</h2>
               <div className="grid-4" style={{ display: "grid", gap: "12px" }}>
                 {stats.map(s => (
                   <div key={s.label} className="card" style={{ background: "white", borderRadius: "16px", padding: "16px", border: "1px solid #e5e7eb" }}>
@@ -117,7 +155,6 @@ export default function AdminDashboard() {
               </div>
             </>
           )}
-
           {tab === "patients" && (
             <div className="card" style={{ background: "white", borderRadius: "16px", padding: "18px", border: "1px solid #e5e7eb" }}>
               <h3 style={{marginTop:0}}>Admit New Patient (Admin Only)</h3>
@@ -142,7 +179,6 @@ export default function AdminDashboard() {
               </div>
             </div>
           )}
-
           {tab === "staff" && (
             <div className="card" style={{ background: "white", borderRadius: "16px", padding: "18px", border: "1px solid #e5e7eb" }}>
               <h3>Register Staff (Admin Only)</h3>
@@ -155,7 +191,6 @@ export default function AdminDashboard() {
               </div>
             </div>
           )}
-
           {tab === "finance" && (
             <div className="card" style={{ background: "white", borderRadius: "16px", padding: "18px", border: "1px solid #e5e7eb" }}>
               <h3>Billing - Finance</h3>
