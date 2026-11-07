@@ -13,6 +13,16 @@ const mockData: Patient[] = [
 const API_URL = (process.env as any).NEXT_PUBLIC_API_URL || "https://enterprise-hospital-os.onrender.com";
 const REALTIME_URL = (process.env as any).NEXT_PUBLIC_REALTIME_URL || "https://hospital-os-realtime.onrender.com";
 
+// FIX: API returns different shapes - normalize all
+const norm = (d:any, key?:string) => {
+  if (Array.isArray(d)) return d;
+  if (Array.isArray(d?.data)) return d.data;
+  if (key && Array.isArray(d?.[key])) return d[key];
+  if (Array.isArray(d?.patients)) return d.patients;
+  if (Array.isArray(d?.items)) return d.items;
+  return [];
+};
+
 export default function HospitalOSMobile() {
   const [active, setActive] = useState("dashboard");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -38,27 +48,48 @@ export default function HospitalOSMobile() {
 
   useEffect(() => {
     setUserType(localStorage.getItem("user_type")||"guest");
-    const fetchAll = async () => {
+
+    const get = async (path:string) => {
       try {
-        const p = await fetch(`${API_URL}/api/patients`, {cache:'no-store'}).then(r=>r.json());
-        const list = p.patients||p.data||p;
-        if(Array.isArray(list)&&list.length>0) setPatients(list.map((x:any)=>({...x, avatar:x.avatar||x.name?.slice(0,2).toUpperCase()})));
-      } catch {}
-      fetch(`${API_URL}/api/staff`, {cache:'no-store'}).then(r=>r.json()).then(d=>{if(Array.isArray(d)) setStaff(d)}).catch(()=>{});
-      fetch(`${API_URL}/api/billing`, {cache:'no-store'}).then(r=>r.json()).then(d=>{if(Array.isArray(d)) setBilling(d)}).catch(()=>{});
-      fetch(`${API_URL}/api/ai`, {cache:'no-store'}).then(r=>r.json()).then(setAiData).catch(()=>{});
-      fetch(`${API_URL}/api/beds`, {cache:'no-store'}).then(r=>r.json()).then(setBeds).catch(()=>{});
-      fetch(`${API_URL}/api/ambulance`, {cache:'no-store'}).then(r=>r.json()).then(setAmbulance).catch(()=>{});
-      fetch(`${API_URL}/api/equipment`, {cache:'no-store'}).then(r=>r.json()).then(setEquipment).catch(()=>{});
-      fetch(`${API_URL}/api/labs`, {cache:'no-store'}).then(r=>r.json()).then(setLabs).catch(()=>{});
-      setLoading(false);
-      try {
-        const s = io(REALTIME_URL, { transports: ['websocket','polling'] });
-        s.on('ward-message', (d:any)=> setMessages(prev=>[...prev, {user:d.user||'Doctor', text:d.text||d.message}]));
-        setSocket(s);
-      } catch {}
+        const r = await fetch(`${API_URL}${path}`, {cache:'no-store'});
+        if(!r.ok) return null;
+        return await r.json();
+      } catch { return null; }
     };
-    fetchAll();
+
+    const refreshAll = async () => {
+      const p = await get("/api/patients");
+      const list = norm(p, "patients");
+      if(list.length>0) setPatients(list.map((x:any)=>({...x, avatar:x.avatar||x.name?.slice(0,2).toUpperCase()})));
+      const s = await get("/api/staff"); if(s) setStaff(norm(s,"staff"));
+      const b = await get("/api/billing"); if(b) setBilling(norm(b,"billing"));
+      const ai = await get("/api/ai"); if(ai) setAiData(ai);
+      const bd = await get("/api/beds"); if(bd) setBeds(norm(bd,"beds"));
+      const am = await get("/api/ambulance"); if(am) setAmbulance(norm(am,"ambulance"));
+      const eq = await get("/api/equipment"); if(eq) setEquipment(norm(eq,"equipment"));
+      const lb = await get("/api/labs"); if(lb) setLabs(norm(lb,"labs"));
+      setLoading(false);
+    };
+
+    refreshAll();
+
+    // AUTO-REFRESH: Admin adds will show in 5s without reload
+    const interval = setInterval(refreshAll, 5000);
+
+    let s: Socket | null = null;
+    try {
+      s = io(REALTIME_URL, { transports: ['websocket','polling'] });
+      s.on('ward-message', (d:any)=> setMessages(prev=>[...prev, {user:d.user||'Doctor', text:d.text||d.message}]));
+      // LIVE UPDATE from Admin
+      s.on('ambulance-updated', async ()=>{ const d = await get("/api/ambulance"); if(d) setAmbulance(norm(d,"ambulance")); });
+      s.on('labs-updated', async ()=>{ const d = await get("/api/labs"); if(d) setLabs(norm(d,"labs")); });
+      s.on('equipment-updated', async ()=>{ const d = await get("/api/equipment"); if(d) setEquipment(norm(d,"equipment")); });
+      s.on('beds-updated', async ()=>{ const d = await get("/api/beds"); if(d) setBeds(norm(d,"beds")); });
+      s.on('patients-updated', async ()=>{ const d = await get("/api/patients"); const l = norm(d,"patients"); if(l.length>0) setPatients(l); });
+      setSocket(s);
+    } catch {}
+
+    return () => { clearInterval(interval); if(s) s.disconnect(); };
   }, []);
 
   const token = () => typeof window!=="undefined"?localStorage.getItem("token")||"":"";
@@ -68,7 +99,7 @@ export default function HospitalOSMobile() {
     if(!isAdmin) return alert("Admin only");
     if(!newPatient.name) return alert("Enter name");
     const res = await fetch(`${API_URL}/api/patients`, {method:"POST", headers:{"Content-Type":"application/json","Authorization":`Bearer ${token()}`}, body:JSON.stringify({...newPatient, status:"Admitted"})});
-    if(res.ok){ const data=await res.json(); setPatients(prev=>[data, ...prev]); setShowAdmit(false); alert("Admitted "+data.id); }
+    if(res.ok){ const data=await res.json(); const one = data?.data || data; setPatients(prev=>[one, ...prev]); setShowAdmit(false); alert("Admitted "+(one.id||"")); }
     else alert("Failed - login as admin");
   };
 
@@ -84,13 +115,15 @@ export default function HospitalOSMobile() {
     const q = chatInput;
     setAiMessages(prev=>[...prev, {user:"You", text:q}]);
     setChatInput("");
-    // Smart suggestion based on keywords + AI predictions
     let reply = "Based on your question, I suggest: rest, monitor vitals, and contact ICU-2 nurse if symptoms worsen. For urgent care, use Live Ward Chat.";
     const low = q.toLowerCase();
     if(low.includes("fever")||low.includes("head")) reply = "For fever/headache: Check temperature, drink water, take paracetamol if prescribed. If fever > 39°C or severe headache, message Live Ward Chat immediately.";
     if(low.includes("bed")) reply = `Available beds: ${beds.filter((b:any)=>b.status==="Available").length} of ${beds.length||8}. Tap Beds tab to see wards.`;
-    if(low.includes("bill")||low.includes("pay")||low.includes("cost")) reply = `Your total billing is ₦${billing.reduce((s:any,b:any)=>s+b.amount,0).toLocaleString()}. Open Billing tab for receipt.`;
+    if(low.includes("bill")||low.includes("pay")||low.includes("cost")) reply = `Your total billing is ₦${billing.reduce((s:any,b:any)=>s+(b.amount||0),0).toLocaleString()}. Open Billing tab for receipt.`;
     if(low.includes("doctor")||low.includes("nurse")) reply = `On-duty staff: ${staff.filter((s:any)=>s.status==="On Duty").length}. Open Staff tab to message them via Live Chat.`;
+    if(low.includes("ambulance")) reply = `Ambulances available: ${ambulance.filter((a:any)=>a.status==="Available").length} of ${ambulance.length}. Open Ambulance tab.`;
+    if(low.includes("lab")) reply = `Labs: ${labs.length} records. ${labs.filter((l:any)=>l.status==="Pending").length} pending. Open Labs tab.`;
+    if(low.includes("equipment")) reply = `Equipment: ${equipment.length} items. Open Equipment tab to see status.`;
     setTimeout(()=> setAiMessages(prev=>[...prev, {user:"AI Assistant", text:reply}]), 600);
   };
 
@@ -107,4 +140,4 @@ export default function HospitalOSMobile() {
       filtered={filtered} admitPatient={admitPatient} sendLiveMessage={sendLiveMessage} askAI={askAI}
     />
   );
-} 
+}
