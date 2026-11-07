@@ -143,4 +143,4 @@ export default function HospitalUI(props:any){
       )}
     </div>
   );
-}
+} 
