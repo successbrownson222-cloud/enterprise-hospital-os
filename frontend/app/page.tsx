@@ -11,6 +11,7 @@ const mockData: Patient[] = [
 ];
 
 const API_URL = (process.env as any).NEXT_PUBLIC_API_URL || "https://enterprise-hospital-os.onrender.com";
+const AI_URL = (process.env as any).NEXT_PUBLIC_AI_URL || "https://hospital-os-ai-python.onrender.com";
 const REALTIME_URL = (process.env as any).NEXT_PUBLIC_REALTIME_URL || "https://hospital-os-realtime.onrender.com";
 
 // FIX: API returns different shapes - normalize all
@@ -49,43 +50,40 @@ export default function HospitalOSMobile() {
   useEffect(() => {
     setUserType(localStorage.getItem("user_type")||"guest");
 
-    const get = async (path:string) => {
+    const get = async (base:string, path:string) => {
       try {
-        const r = await fetch(`${API_URL}${path}`, {cache:'no-store'});
+        const r = await fetch(`${base}${path}`, {cache:'no-store'});
         if(!r.ok) return null;
         return await r.json();
       } catch { return null; }
     };
 
     const refreshAll = async () => {
-      const p = await get("/api/patients");
+      const p = await get(API_URL, "/api/patients");
       const list = norm(p, "patients");
       if(list.length>0) setPatients(list.map((x:any)=>({...x, avatar:x.avatar||x.name?.slice(0,2).toUpperCase()})));
-      const s = await get("/api/staff"); if(s) setStaff(norm(s,"staff"));
-      const b = await get("/api/billing"); if(b) setBilling(norm(b,"billing"));
-      const ai = await get("/api/ai"); if(ai) setAiData(ai);
-      const bd = await get("/api/beds"); if(bd) setBeds(norm(bd,"beds"));
-      const am = await get("/api/ambulance"); if(am) setAmbulance(norm(am,"ambulance"));
-      const eq = await get("/api/equipment"); if(eq) setEquipment(norm(eq,"equipment"));
-      const lb = await get("/api/labs"); if(lb) setLabs(norm(lb,"labs"));
+      const s = await get(API_URL, "/api/staff"); if(s) setStaff(norm(s,"staff"));
+      const b = await get(API_URL, "/api/billing"); if(b) setBilling(norm(b,"billing"));
+      const ai = await get(AI_URL, "/api/ai/predict-bed"); if(ai) setAiData({predictions:[] , ...ai});
+      const bd = await get(API_URL, "/api/beds"); if(bd) setBeds(norm(bd,"beds"));
+      const am = await get(API_URL, "/api/ambulance"); if(am) setAmbulance(norm(am,"ambulance"));
+      const eq = await get(API_URL, "/api/equipment"); if(eq) setEquipment(norm(eq,"equipment"));
+      const lb = await get(API_URL, "/api/labs"); if(lb) setLabs(norm(lb,"labs"));
       setLoading(false);
     };
 
     refreshAll();
-
-    // AUTO-REFRESH: Admin adds will show in 5s without reload
     const interval = setInterval(refreshAll, 5000);
 
     let s: Socket | null = null;
     try {
       s = io(REALTIME_URL, { transports: ['websocket','polling'] });
       s.on('ward-message', (d:any)=> setMessages(prev=>[...prev, {user:d.user||'Doctor', text:d.text||d.message}]));
-      // LIVE UPDATE from Admin
-      s.on('ambulance-updated', async ()=>{ const d = await get("/api/ambulance"); if(d) setAmbulance(norm(d,"ambulance")); });
-      s.on('labs-updated', async ()=>{ const d = await get("/api/labs"); if(d) setLabs(norm(d,"labs")); });
-      s.on('equipment-updated', async ()=>{ const d = await get("/api/equipment"); if(d) setEquipment(norm(d,"equipment")); });
-      s.on('beds-updated', async ()=>{ const d = await get("/api/beds"); if(d) setBeds(norm(d,"beds")); });
-      s.on('patients-updated', async ()=>{ const d = await get("/api/patients"); const l = norm(d,"patients"); if(l.length>0) setPatients(l); });
+      s.on('ambulance-updated', async ()=>{ const d = await get(API_URL,"/api/ambulance"); if(d) setAmbulance(norm(d,"ambulance")); });
+      s.on('labs-updated', async ()=>{ const d = await get(API_URL,"/api/labs"); if(d) setLabs(norm(d,"labs")); });
+      s.on('equipment-updated', async ()=>{ const d = await get(API_URL,"/api/equipment"); if(d) setEquipment(norm(d,"equipment")); });
+      s.on('beds-updated', async ()=>{ const d = await get(API_URL,"/api/beds"); if(d) setBeds(norm(d,"beds")); });
+      s.on('patients-updated', async ()=>{ const d = await get(API_URL,"/api/patients"); const l = norm(d,"patients"); if(l.length>0) setPatients(l); });
       setSocket(s);
     } catch {}
 
@@ -111,37 +109,37 @@ export default function HospitalOSMobile() {
   };
 
   const askAI = async () => {
-  if(!chatInput.trim()) return;
-  const qText = chatInput;
-  setAiMessages(prev=>[...prev, {user:"You", text:qText}]);
-  setChatInput("");
-  setAiMessages(prev=>[...prev, {user:"AI Assistant", text:"Thinking..."}]);
-
-  try {
-    const res = await fetch(`${API_URL}/api/ai/ask`, {
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({
-        question: qText,
-        context: {
-          bedsAvailable: beds.filter((b:any)=>b.status==="Available").length,
-          bedsTotal: beds.length||8,
-          billingTotal: billing.reduce((s:any,b:any)=>s+(b.amount||0),0),
-          staffOnDuty: staff.filter((s:any)=>s.status==="On Duty").length,
-          ambulanceAvailable: ambulance.filter((a:any)=>a.status==="Available").length,
-          labsPending: labs.filter((l:any)=>l.status==="Pending").length,
-          patientsCount: patients.length,
-        }
-      })
-    });
-    const data = await res.json();
-    setAiMessages(prev=> prev.filter(m=>m.text!=="Thinking..."));
-    setAiMessages(prev=>[...prev, {user:"AI Assistant", text: data.answer || "Sorry, try again with more detail."}]);
-  } catch {
-    setAiMessages(prev=> prev.filter(m=>m.text!=="Thinking..."));
-    setAiMessages(prev=>[...prev, {user:"AI Assistant", text:"AI backend is offline. Try again, or use Live Ward Chat for doctors."}]);
-  }
-};
+    if(!chatInput.trim()) return;
+    const qText = chatInput;
+    setAiMessages(prev=>[...prev, {user:"You", text:qText}]);
+    setChatInput("");
+    setAiMessages(prev=>[...prev, {user:"AI Assistant", text:"Thinking..."}]);
+    try {
+      const res = await fetch(`${AI_URL}/api/ai/ask`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          question: qText,
+          context: {
+            bedsAvailable: beds.filter((b:any)=>b.status==="Available").length,
+            bedsTotal: beds.length||8,
+            billingTotal: billing.reduce((s:any,b:any)=>s+(b.amount||0),0),
+            staffOnDuty: staff.filter((s:any)=>s.status==="On Duty").length,
+            ambulanceAvailable: ambulance.filter((a:any)=>a.status==="Available").length,
+            labsPending: labs.filter((l:any)=>l.status==="Pending").length,
+            patientsCount: patients.length,
+          }
+        })
+      });
+      if(!res.ok) throw new Error("AI offline");
+      const data = await res.json();
+      setAiMessages(prev=> prev.filter(m=>m.text!=="Thinking..."));
+      setAiMessages(prev=>[...prev, {user:"AI Assistant", text: data.answer || "Sorry, try again with more detail."}]);
+    } catch {
+      setAiMessages(prev=> prev.filter(m=>m.text!=="Thinking..."));
+      setAiMessages(prev=>[...prev, {user:"AI Assistant", text:"AI backend is waking up (Render sleeps). Wait 20s and ask again, or use Live Ward Chat."}]);
+    }
+  };
 
   const filtered = useMemo(()=> patients.filter(p=> (p.name+p.id).toLowerCase().includes(q.toLowerCase())), [q, patients]);
 
