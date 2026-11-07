@@ -110,22 +110,38 @@ export default function HospitalOSMobile() {
     setChatInput("");
   };
 
-  const askAI = () => {
-    if(!chatInput.trim()) return;
-    const q = chatInput;
-    setAiMessages(prev=>[...prev, {user:"You", text:q}]);
-    setChatInput("");
-    let reply = "Based on your question, I suggest: rest, monitor vitals, and contact ICU-2 nurse if symptoms worsen. For urgent care, use Live Ward Chat.";
-    const low = q.toLowerCase();
-    if(low.includes("fever")||low.includes("head")) reply = "For fever/headache: Check temperature, drink water, take paracetamol if prescribed. If fever > 39°C or severe headache, message Live Ward Chat immediately.";
-    if(low.includes("bed")) reply = `Available beds: ${beds.filter((b:any)=>b.status==="Available").length} of ${beds.length||8}. Tap Beds tab to see wards.`;
-    if(low.includes("bill")||low.includes("pay")||low.includes("cost")) reply = `Your total billing is ₦${billing.reduce((s:any,b:any)=>s+(b.amount||0),0).toLocaleString()}. Open Billing tab for receipt.`;
-    if(low.includes("doctor")||low.includes("nurse")) reply = `On-duty staff: ${staff.filter((s:any)=>s.status==="On Duty").length}. Open Staff tab to message them via Live Chat.`;
-    if(low.includes("ambulance")) reply = `Ambulances available: ${ambulance.filter((a:any)=>a.status==="Available").length} of ${ambulance.length}. Open Ambulance tab.`;
-    if(low.includes("lab")) reply = `Labs: ${labs.length} records. ${labs.filter((l:any)=>l.status==="Pending").length} pending. Open Labs tab.`;
-    if(low.includes("equipment")) reply = `Equipment: ${equipment.length} items. Open Equipment tab to see status.`;
-    setTimeout(()=> setAiMessages(prev=>[...prev, {user:"AI Assistant", text:reply}]), 600);
-  };
+  const askAI = async () => {
+  if(!chatInput.trim()) return;
+  const qText = chatInput;
+  setAiMessages(prev=>[...prev, {user:"You", text:qText}]);
+  setChatInput("");
+  setAiMessages(prev=>[...prev, {user:"AI Assistant", text:"Thinking..."}]);
+
+  try {
+    const res = await fetch(`${API_URL}/api/ai/ask`, {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({
+        question: qText,
+        context: {
+          bedsAvailable: beds.filter((b:any)=>b.status==="Available").length,
+          bedsTotal: beds.length||8,
+          billingTotal: billing.reduce((s:any,b:any)=>s+(b.amount||0),0),
+          staffOnDuty: staff.filter((s:any)=>s.status==="On Duty").length,
+          ambulanceAvailable: ambulance.filter((a:any)=>a.status==="Available").length,
+          labsPending: labs.filter((l:any)=>l.status==="Pending").length,
+          patientsCount: patients.length,
+        }
+      })
+    });
+    const data = await res.json();
+    setAiMessages(prev=> prev.filter(m=>m.text!=="Thinking..."));
+    setAiMessages(prev=>[...prev, {user:"AI Assistant", text: data.answer || "Sorry, try again with more detail."}]);
+  } catch {
+    setAiMessages(prev=> prev.filter(m=>m.text!=="Thinking..."));
+    setAiMessages(prev=>[...prev, {user:"AI Assistant", text:"AI backend is offline. Try again, or use Live Ward Chat for doctors."}]);
+  }
+};
 
   const filtered = useMemo(()=> patients.filter(p=> (p.name+p.id).toLowerCase().includes(q.toLowerCase())), [q, patients]);
 
