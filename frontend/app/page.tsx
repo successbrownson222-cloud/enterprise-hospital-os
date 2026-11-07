@@ -107,4 +107,4 @@ export default function HospitalOSMobile() {
       filtered={filtered} admitPatient={admitPatient} sendLiveMessage={sendLiveMessage} askAI={askAI}
     />
   );
-}
+} 
